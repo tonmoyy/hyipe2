@@ -13,6 +13,9 @@
 }
 
 :root {
+  /* Fallback definitions for the editor – overridden at runtime by next/font */
+  --font-serif: 'Playfair Display', Georgia, serif;
+  --font-sans: 'DM Sans', system-ui, sans-serif;
   --serif: var(--font-serif), Georgia, serif;
   --sans: var(--font-sans), system-ui, sans-serif;
   --cream: #FAFAF7;

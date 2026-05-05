@@ -23,15 +23,15 @@ export default function Header() {
                 : null;
 
     return (
-        <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-20 px-6 bg-[#0D0D0B] text-white text-[11px] tracking-[0.08em] uppercase font-medium">
+        <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-[#0D0D0B] text-white text-[11px] tracking-[0.08em] uppercase font-medium">
             {/* Logo – using SVG from public folder */}
             <Link href="/" className="flex items-center h-full">
                 <Image
-                    src="/hyipe_logo_1.JPG"
+                    src="/hyipe_logo_2.svg"
                     alt="HYIPE"
                     width={0}                // tells Next.js to ignore intrinsic size
                     height={0}               // allows pure CSS sizing
-                    className="h-16 w-auto"  // height 64px inside 80px header – prominent
+                    className="h-10 w-auto"  // height 64px inside 80px header – prominent
                     priority
                 />
             </Link>

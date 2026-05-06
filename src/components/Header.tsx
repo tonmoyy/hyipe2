@@ -126,12 +126,12 @@ export default function Header() {
             {/* Logo */}
             <Link href="/" className="flex items-center h-full">
                 <Image
-                    src="/4.svg"
+                    src="/Layer 3.svg"
                     alt="HYIPE"
 
                     width={0}
                     height={0}
-                    className="h-12 w-auto"
+                    className="h-8 w-auto"
                     priority
                 />
             </Link>

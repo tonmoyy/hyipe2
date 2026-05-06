@@ -122,31 +122,31 @@ export default function Header() {
     }, [fetchNotifications]);
 
     return (
-        <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-zinc-200 text-black text-[11px] tracking-[0.08em] uppercase font-medium">
+        <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-black text-black text-[11px] tracking-[0.08em] uppercase font-medium">
             {/* Logo */}
             <Link href="/" className="flex items-center h-full">
                 <Image
-                    src="/Logo-SVG-HYIPE.svg"
+                    src="/4.svg"
                     alt="HYIPE"
 
                     width={0}
                     height={0}
-                    className="h-10 w-auto"
+                    className="h-12 w-auto"
                     priority
                 />
             </Link>
 
             <nav className="flex items-center gap-5">
-                <Link href="/marketplace" className="text-black hover:text-white transition-colors">
+                <Link href="/marketplace" className="text-white hover:text-white transition-colors">
                     Marketplace
                 </Link>
-                <Link href="/how-it-works" className="text-black hover:text-white transition-colors">
+                <Link href="/how-it-works" className="text-white hover:text-white transition-colors">
                     How it Works
                 </Link>
-                <Link href="/for-brands" className="text-black hover:text-white transition-colors">
+                <Link href="/for-brands" className="text-white hover:text-white transition-colors">
                     For Brands
                 </Link>
-                <Link href="/for-creators" className="text-black hover:text-white transition-colors">
+                <Link href="/for-creators" className="text-white hover:text-white transition-colors">
                     For Creators
                 </Link>
 
@@ -157,7 +157,7 @@ export default function Header() {
             </span>
                         <Link
                             href={`/dashboard/${profile?.role}/profile`}
-                            className="text-black hover:text-white transition-colors"
+                            className="text-white hover:text-white transition-colors"
                         >
                             Dashboard
                         </Link>

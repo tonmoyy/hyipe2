@@ -1,7 +1,7 @@
-// src/app/layout.tsx
 import type { Metadata } from 'next';
 import './globals.css';
 import Header from '@/components/Header';
+import AuthProvider from '@/providers/AuthProvider';
 import { Playfair_Display, DM_Sans } from 'next/font/google';
 
 const playfair = Playfair_Display({
@@ -17,7 +17,6 @@ const dmSans = DM_Sans({
     weight: ['300', '400', '500'],
 });
 
-
 export const metadata: Metadata = {
     title: 'HYIPE – Pakistan’s Creator Marketplace',
     description: 'Where brands meet real creators.',
@@ -30,9 +29,11 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en" className={`${playfair.variable} ${dmSans.variable}`}>
-        <body className="antialiased">
-        <Header />
-        <main>{children}</main>
+        <body>
+        <AuthProvider>
+            <Header />
+            <main>{children}</main>
+        </AuthProvider>
         </body>
         </html>
     );

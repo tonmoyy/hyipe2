@@ -721,22 +721,22 @@ body {
   margin-bottom: 28px;
 }
 
-.auth-tab-select button {
-  padding: 8px 16px;
-  background: none;
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  font-size: 12px;
-  font-family: var(--sans);
-  cursor: pointer;
-  color: var(--ink-soft);
-}
+/*.auth-tab-select button {*/
+/*  padding: 8px 16px;*/
+/*  background: none;*/
+/*  border: 1px solid var(--rule);*/
+/*  border-radius: 2px;*/
+/*  font-size: 12px;*/
+/*  font-family: var(--sans);*/
+/*  cursor: pointer;*/
+/*  color: var(--ink-soft);*/
+/*}*/
 
-.auth-tab-select button.active {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: white;
-}
+/*.auth-tab-select button.active {*/
+/*  border-color: var(--ink);*/
+/*  background: var(--ink);*/
+/*  color: white;*/
+/*}*/
 
 .form-group {
   margin-bottom: 18px;

@@ -1,13 +1,16 @@
 // src/app/page.tsx
 import Link from 'next/link';
+import ComingSoonBanner from "@/components/ComingSoonBanner";
 
 export default function HomePage() {
   return (
       <div className="bg-[#FAFAF7]">
+        <ComingSoonBanner />
+
         {/* Hero */}
         <section className="hp-hero max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-15 px-10 py-20">
           <div>
-            <p className="hp-hero-tag">Pakistan&rsquo;s First Influencer Marketplace</p>
+            <p className="hp-hero-tag font-cinzel font-bold tracking-[0.15em] uppercase">Pakistan&rsquo;s First Influencer Marketplace</p>
             <h1 className="font-['Playfair_Display'] text-6xl leading-tight font-bold mb-7">
               Where Brands<br />Meet <em className="text-[#888880] italic">Real</em><br />Creators.
             </h1>

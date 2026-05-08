@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { useAuth } from '@/providers/AuthProvider';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabaseClient';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import { RealtimeChannel, PostgrestError } from '@supabase/supabase-js';
 import { ChatsCircle } from '@phosphor-icons/react';
 import { X } from 'lucide-react';
 
@@ -27,14 +27,17 @@ export default function Header() {
     const [messages, setMessages] = useState<Message[]>([]);
     const channelRef = useRef<RealtimeChannel | null>(null);
 
+    const fetchNotificationsRef = useRef<() => Promise<void>>(async () => {});
+
+    // ✅ Updated inbox path – now points to the dashboard with ?tab=inbox
     const inboxPath =
         profile?.role === 'influencer'
-            ? '/dashboard/influencer/inbox'
+            ? '/dashboard/influencer?tab=inbox'
             : profile?.role === 'brand'
-                ? '/dashboard/brand/inbox'
+                ? '/dashboard/brand?tab=inbox'
                 : null;
 
-    // Fetch latest unread messages (one per sender) and count distinct senders
+    // --- fetchNotifications ---
     const fetchNotifications = useCallback(async () => {
         if (!user) return;
 
@@ -46,13 +49,14 @@ export default function Header() {
             .order('created_at', { ascending: false });
 
         if (error) {
-            console.error('Error fetching unread messages:', error);
+            if ((error as PostgrestError).code !== 'PGRST204') {
+                console.warn('Unread messages fetch issue:', error.message);
+            }
             return;
         }
 
         const unread = (data ?? []) as Message[];
 
-        // Keep only latest message per sender
         const latestPerSender = new Map<string, Message>();
         unread.forEach((msg) => {
             if (!latestPerSender.has(msg.sender_id)) {
@@ -68,17 +72,31 @@ export default function Header() {
         setUnreadCount(latestPerSender.size);
     }, [user, supabase]);
 
-    // Initial fetch and real-time subscription
+    useEffect(() => {
+        fetchNotificationsRef.current = fetchNotifications;
+    }, [fetchNotifications]);
+
     useEffect(() => {
         if (!user) {
             setUnreadCount(0);
             setMessages([]);
-            return;
+            setOpen(false);
+        }
+    }, [user]);
+
+    useEffect(() => {
+        if (user) {
+            fetchNotifications();
+        }
+    }, [user, fetchNotifications]);
+
+    useEffect(() => {
+        if (!user) return;
+
+        if (channelRef.current) {
+            supabase.removeChannel(channelRef.current);
         }
 
-        fetchNotifications();
-
-        // Subscribe to new messages and updates
         const channel = supabase
             .channel(`header-${user.id}`)
             .on(
@@ -90,7 +108,7 @@ export default function Header() {
                     filter: `receiver_id=eq.${user.id}`,
                 },
                 () => {
-                    fetchNotifications();
+                    fetchNotificationsRef.current();
                 }
             )
             .on(
@@ -102,7 +120,7 @@ export default function Header() {
                     filter: `receiver_id=eq.${user.id}`,
                 },
                 () => {
-                    fetchNotifications();
+                    fetchNotificationsRef.current();
                 }
             )
             .subscribe();
@@ -112,9 +130,8 @@ export default function Header() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [user, supabase, fetchNotifications]);
+    }, [user, supabase]);
 
-    // Listen for custom "inbox:read" event from the Inbox view
     useEffect(() => {
         const handler = () => fetchNotifications();
         window.addEventListener('inbox:read', handler);
@@ -122,13 +139,12 @@ export default function Header() {
     }, [fetchNotifications]);
 
     return (
-        <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-black text-black text-[11px] tracking-[0.08em] uppercase font-medium">
+        <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-[#0D0D0B] text-white text-[11px] tracking-[0.08em] uppercase font-medium">
             {/* Logo */}
             <Link href="/" className="flex items-center h-full">
                 <Image
                     src="/Layer 3.svg"
                     alt="HYIPE"
-
                     width={0}
                     height={0}
                     className="h-8 w-auto"
@@ -137,16 +153,16 @@ export default function Header() {
             </Link>
 
             <nav className="flex items-center gap-5">
-                <Link href="/marketplace" className="text-white hover:text-white transition-colors">
+                <Link href="/marketplace" className="text-white/60 hover:text-white transition-colors">
                     Marketplace
                 </Link>
-                <Link href="/how-it-works" className="text-white hover:text-white transition-colors">
+                <Link href="/how-it-works" className="text-white/60 hover:text-white transition-colors">
                     How it Works
                 </Link>
-                <Link href="/for-brands" className="text-white hover:text-white transition-colors">
+                <Link href="/for-brands" className="text-white/60 hover:text-white transition-colors">
                     For Brands
                 </Link>
-                <Link href="/for-creators" className="text-white hover:text-white transition-colors">
+                <Link href="/for-creators" className="text-white/60 hover:text-white transition-colors">
                     For Creators
                 </Link>
 
@@ -155,14 +171,15 @@ export default function Header() {
             <span className="text-gray-400 normal-case text-[11px] tracking-normal ml-4">
               {profile?.full_name || user.email}
             </span>
+                        {/* ✅ Dashboard link now points to the root of the dashboard */}
                         <Link
-                            href={`/dashboard/${profile?.role}/profile`}
-                            className="text-white hover:text-white transition-colors"
+                            href={`/dashboard/${profile?.role}`}
+                            className="text-white/60 hover:text-white transition-colors"
                         >
                             Dashboard
                         </Link>
 
-                        {/* Inbox Popover with real unread count */}
+                        {/* Inbox Popover */}
                         {inboxPath && (
                             <div className="relative">
                                 <button
@@ -182,19 +199,13 @@ export default function Header() {
 
                                 {open && (
                                     <>
-                                        <div
-                                            className="fixed inset-0 z-40"
-                                            onClick={() => setOpen(false)}
-                                        />
+                                        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
                                         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 z-50">
                                             <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50 rounded-t-lg">
                         <span className="font-semibold text-gray-700 text-sm normal-case tracking-normal">
                           Notifications
                         </span>
-                                                <button
-                                                    onClick={() => setOpen(false)}
-                                                    className="text-gray-400 hover:text-gray-600"
-                                                >
+                                                <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
                                                     <X className="w-4 h-4" />
                                                 </button>
                                             </div>
@@ -207,7 +218,8 @@ export default function Header() {
                                                     messages.map((m) => (
                                                         <Link
                                                             key={m.sender_id}
-                                                            href={`${inboxPath}?partner=${m.sender_id}`}
+                                                            // ✅ Navigate to inbox tab with partner query
+                                                            href={`${inboxPath}&partner=${m.sender_id}`}
                                                             onClick={() => setOpen(false)}
                                                             className={`block px-4 py-3 border-b border-gray-50 transition-colors hover:bg-gray-100 ${
                                                                 !m.read
@@ -231,6 +243,7 @@ export default function Header() {
                                                     ))
                                                 )}
                                             </div>
+                                            {/* ✅ "Open Inbox" link now correctly uses the inboxPath (which includes tab=inbox) */}
                                             <Link
                                                 href={inboxPath}
                                                 onClick={() => setOpen(false)}
@@ -253,7 +266,7 @@ export default function Header() {
                     </>
                 ) : (
                     <div className="flex items-center gap-3 ml-4">
-                        <Link href="/auth" className="text-black hover:text-white transition-colors">
+                        <Link href="/auth" className="text-white/60 hover:text-white transition-colors">
                             Log in
                         </Link>
                         <Link

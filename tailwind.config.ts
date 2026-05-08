@@ -13,6 +13,8 @@ const config: Config = {
         // These match the variable names you used in next/font in layout.tsx
         serif: ['var(--font-serif)', 'Georgia', 'serif'],
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        cinzel: ['var(--font-cinzel)', 'serif'],
+
       },
     },
   },

@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 type Profile = {
     id: string;
     full_name: string | null;
-    role: 'influencer' | 'brand' | null;
+    role: 'influencer' | 'brand' | 'admin' | 'superadmin' | null;
     email: string | null;
 };
 

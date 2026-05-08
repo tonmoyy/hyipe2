@@ -3,6 +3,13 @@ import './globals.css';
 import Header from '@/components/Header';
 import AuthProvider from '@/providers/AuthProvider';
 import { Playfair_Display, DM_Sans } from 'next/font/google';
+import { Cinzel } from 'next/font/google';
+
+const cinzel = Cinzel({
+    subsets: ['latin'],
+    weight: ['700'],  // only bold needed
+    variable: '--font-cinzel',
+});
 
 const playfair = Playfair_Display({
     subsets: ['latin'],

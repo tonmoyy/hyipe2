@@ -10,6 +10,7 @@ type Profile = {
     full_name: string | null;
     role: 'influencer' | 'brand' | 'admin' | 'superadmin' | null;
     email: string | null;
+    status?: string;   // ← add this line
 };
 
 type AuthContextType = {

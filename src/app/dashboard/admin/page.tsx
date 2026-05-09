@@ -1,28 +1,139 @@
-// src/app/dashboard/admin/page.tsx
 'use client';
 
-import { useState, useEffect, Suspense, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import Link from 'next/link';
 import DashboardRoleGuard from '@/components/DashboardRoleGuard';
+import { createClient } from '@/lib/supabaseClient';
 
-type SubView = 'users' | 'monitor' | 'inbox';
+/* ─── Types ─── */
+type SubView = 'users' | 'monitor' | 'inbox' | 'make-admin';
 
-/* ─── Inner component ─── */
+interface Profile {
+    id: string;
+    full_name: string;
+    email: string;
+    role: string;
+    created_at: string;
+    status?: string;
+}
+
+interface CampaignRow {
+    id: string;
+    title: string;
+    niche: string;
+    platform: string;
+    budget: number;
+    deliverable: string;
+    brief: string;
+    min_followers: string;
+    deadline: string;
+    requirements: string;
+    brand_id: string;
+    status: string;
+    created_at: string;
+    brand:
+        | { full_name: string; email?: string }
+        | { full_name: string; email?: string }[]
+        | null;
+}
+
+interface Campaign {
+    id: string;
+    title: string;
+    niche: string;
+    budget: number;
+    status: string;
+    created_at: string;
+    brand: { full_name: string };
+}
+
+interface Message {
+    id: string;
+    sender_id: string;
+    receiver_id: string;
+    content: string;
+    created_at: string;
+    read: boolean;
+}
+
+/* ─── Props for sub‑views ─── */
+interface UserManagementProps {
+    allProfiles: Profile[];
+    loading: boolean;
+    searchQuery: string;
+    setSearchQuery: (value: string) => void;
+    roleFilter: string;
+    setRoleFilter: (value: string) => void;
+    page: number;
+    setPage: (value: number) => void;
+    pageSize: number;
+    onRemoveUser: (id: string) => void;
+    onVerifyUser: (id: string) => void;
+    onViewUser: (profile: Profile) => void;
+    currentAdminRole: string;
+}
+
+interface CampaignMonitorProps {
+    campaigns: Campaign[];
+    loading: boolean;
+    onApprove: (id: string) => void;
+    onReject: (id: string) => void;
+}
+
+interface AdminInboxProps {
+    messages: Message[];
+    loading: boolean;
+    selectedMessage: Message | null;
+    setSelectedMessage: (msg: Message | null) => void;
+}
+
+interface MakeAdminProps {
+    email: string;
+    setEmail: (v: string) => void;
+    onPromote: () => void;
+    loading: boolean;
+    message: { type: 'success' | 'error'; text: string } | null;
+}
+
+/* ─── Main Component ─── */
 function AdminDashboardInner() {
     const { user, profile, signOut, loading: authLoading } = useAuth();
+    const supabase = createClient();
     const searchParams = useSearchParams();
     const router = useRouter();
 
-    const [activeSub, setActiveSub] = useState<SubView>(() => {
+    const initialTab = (() => {
         const tabParam = searchParams?.get('tab') as SubView | null;
-        return tabParam && ['users', 'monitor', 'inbox'].includes(tabParam)
+        return tabParam && ['users', 'monitor', 'inbox', 'make-admin'].includes(tabParam)
             ? tabParam
             : 'users';
-    });
+    })();
 
-    // Client‑side redirect (safety net – the layout already handles it)
+    const [activeSub, setActiveSub] = useState<SubView>(initialTab);
+    const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+    const [pendingCampaigns, setPendingCampaigns] = useState<Campaign[]>([]);
+    const [allMessages, setAllMessages] = useState<Message[]>([]);
+    const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+    const [loadingUsers, setLoadingUsers] = useState(false);
+    const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+    const [loadingMessages, setLoadingMessages] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [roleFilter, setRoleFilter] = useState('all');
+    const [page, setPage] = useState(1);
+    const PAGE_SIZE = 5;
+
+    const [viewProfile, setViewProfile] = useState<Profile | null>(null);
+
+    const [makeAdminEmail, setMakeAdminEmail] = useState('');
+    const [makeAdminLoading, setMakeAdminLoading] = useState(false);
+    const [makeAdminMessage, setMakeAdminMessage] = useState<{
+        type: 'success' | 'error';
+        text: string;
+    } | null>(null);
+
+    // Auth redirect
     useEffect(() => {
         if (authLoading) return;
         if (!user) {
@@ -34,18 +145,158 @@ function AdminDashboardInner() {
         }
     }, [authLoading, user, profile, router]);
 
+    const fetchUsers = useCallback(async () => {
+        setLoadingUsers(true);
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Failed to fetch users:', error);
+            setAllProfiles([]);
+        } else {
+            setAllProfiles((data as Profile[]) ?? []);
+        }
+        setLoadingUsers(false);
+    }, [supabase]);
+
+    const fetchCampaigns = useCallback(async () => {
+        setLoadingCampaigns(true);
+        const { data, error } = await supabase
+            .from('campaigns')
+            .select(
+                `id, title, niche, platform, budget, deliverable, brief, min_followers,
+         deadline, requirements, brand_id, status, created_at,
+         brand:profiles!campaigns_brand_id_fkey (full_name, email)`
+            )
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error(error);
+            setPendingCampaigns([]);
+            setLoadingCampaigns(false);
+            return;
+        }
+
+        const normalised: Campaign[] = ((data as CampaignRow[]) ?? []).map((row) => ({
+            id: row.id,
+            title: row.title,
+            niche: row.niche,
+            budget: row.budget,
+            status: row.status,
+            created_at: row.created_at,
+            brand: {
+                full_name: Array.isArray(row.brand)
+                    ? row.brand[0]?.full_name ?? 'Unknown Brand'
+                    : row.brand?.full_name ?? 'Unknown Brand',
+            },
+        }));
+        setPendingCampaigns(normalised);
+        setLoadingCampaigns(false);
+    }, [supabase]);
+
+    const fetchMessages = useCallback(async () => {
+        setLoadingMessages(true);
+        const { data } = await supabase
+            .from('messages')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+        setAllMessages((data as Message[]) ?? []);
+        setLoadingMessages(false);
+    }, [supabase]);
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    useEffect(() => {
+        if (initialTab === 'users') fetchUsers();
+        if (initialTab === 'monitor') fetchCampaigns();
+        if (initialTab === 'inbox') fetchMessages();
+    }, [initialTab, fetchUsers, fetchCampaigns, fetchMessages]);
+
     const switchTab = useCallback(
-        (tab: SubView) => {
+        async (tab: SubView) => {
             setActiveSub(tab);
             const params = new URLSearchParams(searchParams?.toString() ?? '');
             params.set('tab', tab);
             router.replace(`/dashboard/admin?${params.toString()}`, { scroll: false });
+            if (tab === 'users') await fetchUsers();
+            if (tab === 'monitor') await fetchCampaigns();
+            if (tab === 'inbox') await fetchMessages();
+            setMakeAdminMessage(null);
         },
-        [searchParams, router]
+        [searchParams, router, fetchUsers, fetchCampaigns, fetchMessages]
     );
 
-    // Access denied UI (still here for safety, but the role guard will catch it)
-    if (authLoading || !user || !profile || (profile.role !== 'admin' && profile.role !== 'superadmin')) {
+    const handleApprove = async (id: string) => {
+        await supabase.from('campaigns').update({ status: 'live' }).eq('id', id);
+        setPendingCampaigns((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, status: 'live' } : c))
+        );
+    };
+
+    const handleReject = async (id: string) => {
+        await supabase.from('campaigns').update({ status: 'rejected' }).eq('id', id);
+        setPendingCampaigns((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, status: 'rejected' } : c))
+        );
+    };
+
+    const handleRemoveUser = async (id: string) => {
+        const { error } = await supabase.rpc('delete_user', { user_id: id });
+        if (error) {
+            alert('Failed to remove user: ' + error.message);
+        } else {
+            setAllProfiles((prev) => prev.filter((p) => p.id !== id));
+        }
+    };
+
+    const handleVerifyUser = async (id: string) => {
+        const { error } = await supabase
+            .from('profiles')
+            .update({ status: 'active' })
+            .eq('id', id);
+        if (error) {
+            alert('Failed to verify user: ' + error.message);
+        } else {
+            setAllProfiles((prev) =>
+                prev.map((p) => (p.id === id ? { ...p, status: 'active' } : p))
+            );
+        }
+    };
+
+    const handlePromoteToAdmin = async () => {
+        if (!makeAdminEmail.trim()) return;
+        setMakeAdminLoading(true);
+        setMakeAdminMessage(null);
+
+        const { error } = await supabase.rpc('promote_to_admin', {
+            email: makeAdminEmail.trim(),
+        });
+
+        if (error) {
+            setMakeAdminMessage({ type: 'error', text: error.message });
+        } else {
+            setMakeAdminMessage({
+                type: 'success',
+                text: `${makeAdminEmail} has been promoted to Admin.`,
+            });
+            setMakeAdminEmail('');
+            await fetchUsers();
+        }
+        setMakeAdminLoading(false);
+    };
+
+    const pendingCount = pendingCampaigns.filter(
+        (c) => c.status === 'under_review'
+    ).length;
+
+    if (
+        authLoading ||
+        !user ||
+        !profile ||
+        (profile.role !== 'admin' && profile.role !== 'superadmin')
+    ) {
         return (
             <div className="flex items-center justify-center min-h-[calc(100vh-48px)] bg-[#F6F6F2]">
                 <div className="text-center">
@@ -57,102 +308,137 @@ function AdminDashboardInner() {
         );
     }
 
-    const pendingCampaigns = 3;
+    // Build sidebar navigation with proper types
+    const navItems: { key: SubView; icon: string; label: string }[] = [
+        { key: 'users', icon: '◎', label: 'User Management' },
+        { key: 'monitor', icon: '◈', label: 'Campaign Monitor' },
+        { key: 'inbox', icon: '◻', label: 'Inbox Viewer' },
+    ];
+    if (profile?.role === 'superadmin') {
+        navItems.push({ key: 'make-admin', icon: '⚡', label: 'Make Admin' });
+    }
 
     return (
         <div className="dashboard-shell flex min-h-[calc(100vh-48px)]">
-            {/* Sidebar */}
             <aside className="sidebar bg-white border-r border-[#E5E5DF] w-[220px] flex flex-col py-7 px-0">
                 <div className="sidebar-brand px-6 mb-8">
-                    <Link href="/public" className="logo font-['Playfair_Display'] text-lg font-bold">
-                        HYIPE
-                    </Link>
-                    <span className="role-pill text-[9px] uppercase text-white bg-[#A32D2D] px-1.5 py-0.5 rounded-full inline-block mt-1">
+                    <Link href="/" className="logo font-['Playfair_Display'] text-lg font-bold">HYIPE</Link>
+                    <span className="text-[9px] uppercase text-white bg-[#A32D2D] px-1.5 py-0.5 rounded-full inline-block mt-1">
             {profile?.role === 'superadmin' ? 'Super Admin' : 'Admin'}
           </span>
                 </div>
 
                 <nav className="sidebar-nav flex-1 px-3">
-                    <button
-                        onClick={() => switchTab('users')}
-                        className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
-                            activeSub === 'users' ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
-                        }`}
-                    >
-                        <span className="nav-icon text-[13px] opacity-50">◎</span>
-                        User Management
-                    </button>
-
-                    <button
-                        onClick={() => switchTab('monitor')}
-                        className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
-                            activeSub === 'monitor' ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
-                        }`}
-                    >
-                        <span className="nav-icon text-[13px] opacity-50">◈</span>
-                        Campaign Monitor
-                        {pendingCampaigns > 0 && (
-                            <span className="badge-count ml-auto bg-[#A32D2D] text-white text-[9px] px-1.5 py-0.5 rounded-full">
-                {pendingCampaigns}
-              </span>
-                        )}
-                    </button>
-
-                    <button
-                        onClick={() => switchTab('inbox')}
-                        className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
-                            activeSub === 'inbox' ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
-                        }`}
-                    >
-                        <span className="nav-icon text-[13px] opacity-50">◻</span>
-                        Inbox Viewer
-                    </button>
+                    {navItems.map(({ key, icon, label }) => (
+                        <button
+                            key={key}
+                            onClick={() => switchTab(key)}
+                            className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
+                                activeSub === key
+                                    ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]'
+                                    : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
+                            }`}
+                        >
+                            <span className="text-[13px] opacity-50">{icon}</span>
+                            {label}
+                            {key === 'monitor' && pendingCount > 0 && (
+                                <span className="ml-auto bg-[#A32D2D] text-white text-[9px] px-1.5 py-0.5 rounded-full">{pendingCount}</span>
+                            )}
+                        </button>
+                    ))}
                 </nav>
 
-                <div className="sidebar-user mt-auto px-6 py-4 border-t border-[#E5E5DF]">
-                    <div className="name text-sm font-medium">{profile?.full_name || 'Platform Admin'}</div>
-                    <div className="email text-[11px] text-[#888880]">{profile?.email || 'admin@thehyipe.com'}</div>
-                    <button onClick={() => signOut()} className="logout text-[11px] text-[#888880] underline mt-1.5 inline-block">
-                        ← Back to site
-                    </button>
+                <div className="mt-auto px-6 py-4 border-t border-[#E5E5DF]">
+                    <div className="text-sm font-medium">{profile?.full_name || 'Platform Admin'}</div>
+                    <div className="text-[11px] text-[#888880]">{user?.email || 'admin@thehyipe.com'}</div>
+                    <button onClick={() => signOut()} className="text-[11px] text-[#888880] underline mt-1.5 inline-block">← Back to site</button>
                 </div>
             </aside>
 
-            {/* Main content */}
             <main className="dash-content bg-[#F6F6F2] flex-1 p-10 overflow-y-auto">
-                {activeSub === 'users' && <UserManagementSection />}
-                {activeSub === 'monitor' && <CampaignMonitorSection />}
-                {activeSub === 'inbox' && <AdminInboxSection />}
+                {activeSub === 'users' && (
+                    <UserManagementSection
+                        allProfiles={allProfiles} loading={loadingUsers}
+                        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+                        roleFilter={roleFilter} setRoleFilter={setRoleFilter}
+                        page={page} setPage={setPage} pageSize={PAGE_SIZE}
+                        onRemoveUser={handleRemoveUser} onVerifyUser={handleVerifyUser}
+                        onViewUser={(p) => setViewProfile(p)}
+                        currentAdminRole={profile?.role ?? 'admin'}
+                    />
+                )}
+                {activeSub === 'monitor' && (
+                    <CampaignMonitorSection
+                        campaigns={pendingCampaigns} loading={loadingCampaigns}
+                        onApprove={handleApprove} onReject={handleReject}
+                    />
+                )}
+                {activeSub === 'inbox' && (
+                    <AdminInboxSection
+                        messages={allMessages} loading={loadingMessages}
+                        selectedMessage={selectedMessage} setSelectedMessage={setSelectedMessage}
+                    />
+                )}
+                {activeSub === 'make-admin' && (
+                    <MakeAdminSection
+                        email={makeAdminEmail} setEmail={setMakeAdminEmail}
+                        onPromote={handlePromoteToAdmin} loading={makeAdminLoading}
+                        message={makeAdminMessage}
+                    />
+                )}
             </main>
+
+            {viewProfile && (
+                <div className="fixed inset-0 bg-black/45 z-[200] flex items-center justify-center">
+                    <div className="bg-white rounded p-9 max-w-[560px] w-[90%] max-h-[85vh] overflow-y-auto">
+                        <h2 className="font-['Playfair_Display'] text-2xl mb-4">User Details</h2>
+                        <div className="space-y-2 text-sm">
+                            <p><strong>Name:</strong> {viewProfile.full_name}</p>
+                            <p><strong>Email:</strong> {viewProfile.email}</p>
+                            <p><strong>Role:</strong> {viewProfile.role}</p>
+                            <p><strong>Joined:</strong> {new Date(viewProfile.created_at).toLocaleDateString()}</p>
+                            <p><strong>Status:</strong> {viewProfile.status || 'Pending'}</p>
+                        </div>
+                        <div className="flex justify-end mt-6">
+                            <button onClick={() => setViewProfile(null)} className="btn-primary bg-[#0D0D0B] text-white px-4 py-2 text-xs uppercase tracking-[0.06em]">Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
 
-// Wrap with role guard for extra safety
-export default function AdminDashboard() {
-    return (
-        <DashboardRoleGuard roleParam="admin">
-            <Suspense fallback={<div className="flex justify-center items-center min-h-screen">Loading...</div>}>
-                <AdminDashboardInner />
-            </Suspense>
-        </DashboardRoleGuard>
-    );
-}
+/* ─── User Management Section ─── */
+function UserManagementSection({
+                                   allProfiles, loading, searchQuery, setSearchQuery, roleFilter, setRoleFilter,
+                                   page, setPage, pageSize, onRemoveUser, onVerifyUser, onViewUser, currentAdminRole,
+                               }: UserManagementProps) {
+    const filtered = allProfiles
+        .filter((p) => (roleFilter === 'all' ? true : p.role === roleFilter))
+        .filter((p) => p.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.email?.toLowerCase().includes(searchQuery.toLowerCase()));
 
-/* ─── User Management Sub‑View ─── */
-function UserManagementSection() {
+    const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+    const totalPages = Math.ceil(filtered.length / pageSize);
+
+    const canDelete = (targetRole: string) => {
+        if (targetRole === 'superadmin') return false;
+        if (targetRole === 'admin' && currentAdminRole !== 'superadmin') return false;
+        return true;
+    };
+
     return (
         <>
             <div className="admin-top flex justify-between items-center mb-5">
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">
-                    User Management <span className="badge-count bg-[#0D0D0B] text-white text-[10px] px-1.5 py-0.5 rounded-full ml-1.5">24</span>
+                    User Management <span className="badge-count bg-[#0D0D0B] text-white text-[10px] px-1.5 py-0.5 rounded-full ml-1.5">{allProfiles.length}</span>
                 </h2>
                 <div className="flex gap-2">
-                    <input placeholder="Search users..." className="border border-[#E5E5DF] px-3 py-2 rounded text-xs font-sans outline-none" />
-                    <select className="filter-select border border-[#E5E5DF] rounded px-3 py-2 text-xs bg-white outline-none">
-                        <option>All Users</option>
-                        <option>Brands</option>
-                        <option>Creators</option>
+                    <input placeholder="Search users..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="border border-[#E5E5DF] px-3 py-2 rounded text-xs font-sans outline-none" />
+                    <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="filter-select border border-[#E5E5DF] rounded px-3 py-2 text-xs bg-white outline-none">
+                        <option value="all">All Users</option>
+                        <option value="brand">Brands</option>
+                        <option value="influencer">Creators</option>
                     </select>
                 </div>
             </div>
@@ -169,96 +455,115 @@ function UserManagementSection() {
                 </tr>
                 </thead>
                 <tbody>
-                {/* Row 1 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm"><strong>Ayesha Noor</strong></td>
-                    <td className="px-4 py-3 text-sm">ayesha@email.com</td>
-                    <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">Creator</span></td>
-                    <td className="px-4 py-3 text-sm">Jun 10, 2025</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-approved bg-[#E8F5E0] text-[#2A6000] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
-                    </td>
-                </tr>
-                {/* Row 2 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm"><strong>Khaadi Pakistan</strong></td>
-                    <td className="px-4 py-3 text-sm">marketing@khaadi.com</td>
-                    <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">Brand</span></td>
-                    <td className="px-4 py-3 text-sm">Jun 8, 2025</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-approved bg-[#E8F5E0] text-[#2A6000] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
-                    </td>
-                </tr>
-                {/* Row 3 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm"><strong>Bilal Chaudhry</strong></td>
-                    <td className="px-4 py-3 text-sm">bilalc@email.com</td>
-                    <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">Creator</span></td>
-                    <td className="px-4 py-3 text-sm">Jun 11, 2025</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-pending bg-[#FFF8E6] text-[#7A5200] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Pending</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Verify</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
-                    </td>
-                </tr>
-                {/* Row 4 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm"><strong>Tecno Mobile PK</strong></td>
-                    <td className="px-4 py-3 text-sm">mktg@tecno.pk</td>
-                    <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">Brand</span></td>
-                    <td className="px-4 py-3 text-sm">Jun 9, 2025</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-approved bg-[#E8F5E0] text-[#2A6000] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
-                    </td>
-                </tr>
-                {/* Row 5 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm"><strong>Sara Baig</strong></td>
-                    <td className="px-4 py-3 text-sm">sara@baigcreates.com</td>
-                    <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">Creator</span></td>
-                    <td className="px-4 py-3 text-sm">Jun 12, 2025</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-approved bg-[#E8F5E0] text-[#2A6000] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
-                    </td>
-                </tr>
+                {loading ? (
+                    <tr><td colSpan={6} className="text-center py-4 text-sm text-[#888880]">Loading...</td></tr>
+                ) : paginated.length === 0 ? (
+                    <tr><td colSpan={6} className="text-center py-4 text-sm text-[#888880]">No users found.</td></tr>
+                ) : (
+                    paginated.map((p) => (
+                        <tr key={p.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
+                            <td className="px-4 py-3 text-sm"><strong>{p.full_name}</strong></td>
+                            <td className="px-4 py-3 text-sm">{p.email}</td>
+                            <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">{p.role}</span></td>
+                            <td className="px-4 py-3 text-sm">{new Date(p.created_at).toLocaleDateString()}</td>
+                            <td className="px-4 py-3 text-sm"><span className={`status-badge px-2.5 py-1 rounded text-[10px] uppercase font-medium ${p.status === 'active' ? 'bg-[#E8F5E0] text-[#2A6000]' : 'bg-[#FFF8E6] text-[#7A5200]'}`}>{p.status || 'Pending'}</span></td>
+                            <td className="admin-actions flex gap-1.5">
+                                <button onClick={() => onViewUser(p)} className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
+                                {p.status !== 'active' && (
+                                    <button onClick={() => onVerifyUser(p.id)} className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Verify</button>
+                                )}
+                                {canDelete(p.role) && (
+                                    <button onClick={() => onRemoveUser(p.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
+                                )}
+                            </td>
+                        </tr>
+                    ))
+                )}
                 </tbody>
             </table>
 
             <div className="flex justify-between items-center mt-4">
-                <span className="text-xs text-[#888880]">Showing 5 of 24 users</span>
+                <span className="text-xs text-[#888880]">Showing {paginated.length} of {filtered.length} users</span>
                 <div className="flex gap-1">
-                    <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">← Prev</button>
-                    <button className="btn-sm bg-[#0D0D0B] text-white border-[#0D0D0B] px-3 py-1 text-[10px] uppercase">1</button>
-                    <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">2</button>
-                    <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">3</button>
-                    <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">Next →</button>
+                    <button onClick={() => setPage(page > 1 ? page - 1 : 1)} disabled={page === 1} className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase disabled:opacity-50">← Prev</button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+                        <button key={pg} onClick={() => setPage(pg)} className={`btn-sm px-3 py-1 text-[10px] uppercase ${pg === page ? 'bg-[#0D0D0B] text-white border-[#0D0D0B]' : 'border border-[#E5E5DF] text-[#3A3A36]'}`}>{pg}</button>
+                    ))}
+                    <button onClick={() => setPage(page < totalPages ? page + 1 : totalPages)} disabled={page === totalPages} className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase disabled:opacity-50">Next →</button>
                 </div>
             </div>
         </>
     );
 }
 
-/* ─── Campaign Monitor Sub‑View ─── */
-function CampaignMonitorSection() {
+/* ─── Make Admin Section ─── */
+function MakeAdminSection({ email, setEmail, onPromote, loading, message }: MakeAdminProps) {
+    return (
+        <>
+            <div className="dash-header mb-7">
+                <h1 className="font-['Playfair_Display'] text-3xl font-normal">Make Admin</h1>
+                <p className="text-sm text-[#888880] mt-1">
+                    Promote an existing user to Admin by entering their email address.
+                </p>
+            </div>
+
+            <div className="profile-card bg-white border border-[#E5E5DF] rounded p-7 max-w-[560px]">
+                <div className="form-group mb-4">
+                    <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">User Email</label>
+                    <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="user@example.com"
+                        className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm"
+                    />
+                </div>
+
+                {message && (
+                    <div
+                        className={`p-3 rounded mb-4 text-xs ${
+                            message.type === 'success'
+                                ? 'bg-[#E8F5E0] text-[#2A6000] border border-[#B6D7A8]'
+                                : 'bg-[#FFF8E6] text-[#7A5200] border border-[#F0D88A]'
+                        }`}
+                    >
+                        {message.text}
+                    </div>
+                )}
+
+                <button
+                    onClick={onPromote}
+                    disabled={loading || !email.trim()}
+                    className="btn-primary bg-[#0D0D0B] text-white px-7 py-2.5 text-xs uppercase tracking-[0.06em] disabled:opacity-50"
+                >
+                    {loading ? 'Promoting...' : 'Promote to Admin'}
+                </button>
+            </div>
+        </>
+    );
+}
+
+/* ─── Campaign Monitor Section ─── */
+function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: CampaignMonitorProps) {
+    const awaitingReview = campaigns.filter((c) => c.status === 'under_review');
+    const liveCampaigns = campaigns.filter((c) => c.status === 'live');
+
     return (
         <>
             <div className="admin-top flex justify-between items-center mb-5">
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">Campaign Monitor</h2>
-                <span className="wf-note bg-[#FFFBEA] border border-[#F0D88A] rounded px-2 py-1 text-[10px] text-[#7A6200] font-mono uppercase">
-          3 awaiting approval
-        </span>
+                {awaitingReview.length > 0 && (
+                    <span className="wf-note bg-[#FFFBEA] border border-[#F0D88A] rounded px-2 py-1 text-[10px] text-[#7A6200] font-mono uppercase">
+            {awaitingReview.length} awaiting approval
+          </span>
+                )}
             </div>
-            <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded p-3.5 mb-5 text-sm">
-                ⚠ <strong>3 campaigns</strong> are pending your review before they go live on the marketplace.
-            </div>
+
+            {awaitingReview.length > 0 && (
+                <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded p-3.5 mb-5 text-sm">
+                    ⚠ <strong>{awaitingReview.length} campaigns</strong> are pending your review before they go live on the marketplace.
+                </div>
+            )}
 
             <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden">
                 <thead>
@@ -272,77 +577,62 @@ function CampaignMonitorSection() {
                 </tr>
                 </thead>
                 <tbody>
-                {/* Row 1 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm">
-                        <strong>Back to School Accessories</strong><br />
-                        <span className="text-[11px] text-[#888880]">TikTok · Lifestyle</span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">Khaadi Pakistan</td>
-                    <td className="px-4 py-3 text-sm">Rs. 50,000</td>
-                    <td className="px-4 py-3 text-sm">Jun 12</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-pending bg-[#FFF8E6] text-[#7A5200] px-2.5 py-1 rounded text-[10px] uppercase font-medium">In Review</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">Preview</button>
-                        <button className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Approve →</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
-                    </td>
-                </tr>
-                {/* Row 2 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm">
-                        <strong>Ramzan Cooking Series Vol.2</strong><br />
-                        <span className="text-[11px] text-[#888880]">YouTube · Food</span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">Nestlé Pakistan</td>
-                    <td className="px-4 py-3 text-sm">Rs. 200,000</td>
-                    <td className="px-4 py-3 text-sm">Jun 11</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-pending bg-[#FFF8E6] text-[#7A5200] px-2.5 py-1 rounded text-[10px] uppercase font-medium">In Review</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">Preview</button>
-                        <button className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Approve →</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
-                    </td>
-                </tr>
-                {/* Row 3 */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm">
-                        <strong>Fitness Challenge Campaign</strong><br />
-                        <span className="text-[11px] text-[#888880]">Instagram · Fitness</span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">ProFit Pakistan</td>
-                    <td className="px-4 py-3 text-sm">Rs. 80,000</td>
-                    <td className="px-4 py-3 text-sm">Jun 11</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-pending bg-[#FFF8E6] text-[#7A5200] px-2.5 py-1 rounded text-[10px] uppercase font-medium">In Review</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">Preview</button>
-                        <button className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Approve →</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
-                    </td>
-                </tr>
-                {/* Row 4 – live */}
-                <tr className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                    <td className="px-4 py-3 text-sm">
-                        <strong>Summer Eid Collection</strong><br />
-                        <span className="text-[11px] text-[#888880]">Instagram · Fashion</span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">Khaadi Pakistan</td>
-                    <td className="px-4 py-3 text-sm">Rs. 100,000</td>
-                    <td className="px-4 py-3 text-sm">Jun 8</td>
-                    <td className="px-4 py-3 text-sm"><span className="status-badge status-live bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Live</span></td>
-                    <td className="admin-actions flex gap-1.5">
-                        <button className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View Live</button>
-                        <button className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Pause</button>
-                    </td>
-                </tr>
+                {loading ? (
+                    <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-[#888880]">Loading campaigns...</td></tr>
+                ) : awaitingReview.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-[#888880]">No campaigns awaiting review.</td></tr>
+                ) : (
+                    awaitingReview.map((c) => (
+                        <tr key={c.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
+                            <td className="px-4 py-3 text-sm">
+                                <strong>{c.title}</strong><br />
+                                <span className="text-[11px] text-[#888880]">{c.niche}</span>
+                            </td>
+                            <td className="px-4 py-3 text-sm">{c.brand.full_name}</td>
+                            <td className="px-4 py-3 text-sm">Rs. {Number(c.budget).toLocaleString()}</td>
+                            <td className="px-4 py-3 text-sm">{new Date(c.created_at).toLocaleDateString()}</td>
+                            <td className="px-4 py-3 text-sm"><span className="status-badge status-pending bg-[#FFF8E6] text-[#7A5200] px-2.5 py-1 rounded text-[10px] uppercase font-medium">In Review</span></td>
+                            <td className="admin-actions flex gap-1.5">
+                                <button onClick={() => onApprove(c.id)} className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Approve →</button>
+                                <button onClick={() => onReject(c.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
+                            </td>
+                        </tr>
+                    ))
+                )}
                 </tbody>
             </table>
+
+            {liveCampaigns.length > 0 && (
+                <>
+                    <h3 className="mt-8 mb-3 text-lg font-['Playfair_Display'] font-medium">Live Campaigns</h3>
+                    <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden">
+                        <thead>
+                        <tr>
+                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Campaign</th>
+                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Brand</th>
+                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Budget</th>
+                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Status</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {liveCampaigns.map((c) => (
+                            <tr key={c.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
+                                <td className="px-4 py-3 text-sm"><strong>{c.title}</strong></td>
+                                <td className="px-4 py-3 text-sm">{c.brand.full_name}</td>
+                                <td className="px-4 py-3 text-sm">Rs. {Number(c.budget).toLocaleString()}</td>
+                                <td className="px-4 py-3 text-sm"><span className="status-badge status-live bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Live ✓</span></td>
+                            </tr>
+                        ))}
+                        </tbody>
+                    </table>
+                </>
+            )}
         </>
     );
 }
 
-/* ─── Admin Inbox Viewer Sub‑View ─── */
-function AdminInboxSection() {
+/* ─── Admin Inbox Section ─── */
+function AdminInboxSection({ messages, loading, selectedMessage, setSelectedMessage }: AdminInboxProps) {
     return (
         <>
             <div className="admin-top flex flex-col gap-2 mb-5">
@@ -353,79 +643,49 @@ function AdminInboxSection() {
             </div>
 
             <div className="inbox-layout grid grid-cols-[280px_1fr] h-[calc(100vh-170px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
-                {/* Conversation list */}
                 <div className="inbox-list border-r border-[#E5E5DF] overflow-y-auto">
-                    <div className="inbox-list-header px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium">
-                        All Conversations
-                    </div>
-
-                    <div className="inbox-item active px-4 py-3 bg-[#F6F6F2] border-b border-[#E5E5DF] cursor-pointer">
-                        <div className="sender flex justify-between text-sm font-medium">
-                            <span>Ayesha ↔ Tecno Mobile</span>
-                            <span className="text-[10px] text-[#888880] font-normal">2h</span>
-                        </div>
-                        <div className="campaign-tag text-[10px] text-[#888880] italic mt-0.5">Smartphone Launch TikTok</div>
-                        <div className="preview text-xs text-[#888880] truncate">Can you send us the first draft by...</div>
-                    </div>
-
-                    <div className="inbox-item px-4 py-3 border-b border-[#E5E5DF] cursor-pointer hover:bg-[#F6F6F2]">
-                        <div className="sender flex justify-between text-sm font-medium">
-                            <span>Khaadi ↔ Ayesha Noor</span>
-                            <span className="text-[10px] text-[#888880] font-normal">3h</span>
-                        </div>
-                        <div className="campaign-tag text-[10px] text-[#888880] italic mt-0.5">Summer Eid Collection</div>
-                        <div className="preview text-xs text-[#888880] truncate">We&apos;re going for muted earth tones — beige...</div>
-                    </div>
-
-                    <div className="inbox-item px-4 py-3 border-b border-[#E5E5DF] cursor-pointer hover:bg-[#F6F6F2]">
-                        <div className="sender flex justify-between text-sm font-medium">
-                            <span>Sara ↔ Foodpanda</span>
-                            <span className="text-[10px] text-[#888880] font-normal">1d</span>
-                        </div>
-                        <div className="campaign-tag text-[10px] text-[#888880] italic mt-0.5">Monthly Deals Campaign</div>
-                        <div className="preview text-xs text-[#888880] truncate">Script approved! You&apos;re good to go film...</div>
-                    </div>
+                    <div className="inbox-list-header px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium">All Conversations</div>
+                    {loading ? (
+                        <p className="px-4 py-4 text-xs text-[#888880]">Loading...</p>
+                    ) : messages.length === 0 ? (
+                        <p className="px-4 py-4 text-xs text-[#888880]">No messages yet.</p>
+                    ) : (
+                        messages.map((msg) => (
+                            <div key={msg.id} onClick={() => setSelectedMessage(msg)} className={`px-4 py-3 border-b border-[#E5E5DF] cursor-pointer hover:bg-[#F6F6F2] ${selectedMessage?.id === msg.id ? 'bg-[#F6F6F2]' : ''}`}>
+                                <div className="flex justify-between text-sm font-medium">
+                                    <span>{msg.sender_id.slice(0, 8)} → {msg.receiver_id.slice(0, 8)}</span>
+                                    <span className="text-[10px] text-[#888880] font-normal">{new Date(msg.created_at).toLocaleDateString()}</span>
+                                </div>
+                                <div className="text-xs text-[#888880] truncate mt-1">{msg.content}</div>
+                            </div>
+                        ))
+                    )}
                 </div>
 
-                {/* Chat pane – read‑only */}
-                <div className="chat-pane flex flex-col">
-                    <div className="chat-header px-5 py-4 border-b border-[#E5E5DF] flex items-center gap-3">
-                        <div className="avatar w-9 h-9 rounded-full bg-[#EEF2FF] flex items-center justify-center text-[10px] font-medium text-[#3040A0]">👁</div>
-                        <div>
-                            <strong className="text-sm block">Ayesha Noor ↔ Tecno Mobile</strong>
-                            <span className="text-[11px] text-[#888880]">Smartphone Launch TikTok · Read-only admin view</span>
+                <div className="chat-pane flex flex-col items-center justify-center text-sm text-[#888880]">
+                    {selectedMessage ? (
+                        <div className="p-5 overflow-y-auto w-full h-full">
+                            <p><strong>From:</strong> {selectedMessage.sender_id}</p>
+                            <p><strong>To:</strong> {selectedMessage.receiver_id}</p>
+                            <p className="mt-2">{selectedMessage.content}</p>
+                            <p className="text-xs text-[#888880] mt-2">{new Date(selectedMessage.created_at).toLocaleString()}</p>
                         </div>
-                    </div>
-
-                    <div className="chat-messages flex-1 p-5 overflow-y-auto flex flex-col gap-3">
-                        <div className="msg other bg-[#F0F0EA] self-start max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed">
-                            Hi Ayesha! Excited to be working with you on this campaign. The brief has been unlocked.
-                            <div className="msg-meta text-[10px] text-[#888880] mt-1">Tecno Mobile · 10:22 AM</div>
-                        </div>
-
-                        <div className="msg me bg-[#EEF2FF] text-[#1A1A4A] self-end max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed">
-                            Thank you! I&apos;ve gone through the brief. I&apos;ll have the first concept ready by Wednesday.
-                            <div className="msg-meta text-[10px] text-[#5060A0] mt-1 text-right">Ayesha Noor · 11:05 AM</div>
-                        </div>
-
-                        <div className="msg other bg-[#F0F0EA] self-start max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed">
-                            Perfect. Can you send the first draft by Thursday?
-                            <div className="msg-meta text-[10px] text-[#888880] mt-1">Tecno Mobile · 11:30 AM</div>
-                        </div>
-                    </div>
-
-                    <div className="chat-input bg-[#F6F6F2] border-t border-[#E5E5DF] px-4 py-3 flex gap-2.5">
-                        <input
-                            placeholder="Admin read-only — cannot send messages"
-                            disabled
-                            className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none bg-[#F0F0EA] text-[#888880]"
-                        />
-                        <button disabled className="chat-send bg-[#0D0D0B] text-white px-5 py-2 text-xs uppercase tracking-[0.04em] opacity-40 cursor-default">
-                            Send
-                        </button>
-                    </div>
+                    ) : (
+                        <p>Select a conversation to read</p>
+                    )}
                 </div>
             </div>
         </>
+    );
+}
+
+/* ─── Export ─── */
+export default function AdminDashboard() {
+    return (
+        <DashboardRoleGuard roleParam="admin">
+            <Suspense fallback={<div className="flex justify-center items-center min-h-screen">Loading...</div>}>
+                <AdminDashboardInner />
+            </Suspense>
+        </DashboardRoleGuard>
     );
 }

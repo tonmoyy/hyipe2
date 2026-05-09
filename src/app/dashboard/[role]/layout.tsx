@@ -4,18 +4,15 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
-// ✅ Force server‑side execution on every request (no caching)
 export const dynamic = 'force-dynamic';
 
-// Allowed URL segments
-const allAllowedSegments = ['influencer', 'brand', 'admin', 'superadmin'];
+const allAllowedSegments = ['influencer', 'brand', 'admin'];
 
-// Which dashboard pages each real role can access
 const roleDashboardMap: Record<string, string[]> = {
     influencer: ['influencer'],
     brand: ['brand'],
-    admin: ['admin', 'superadmin'],
-    superadmin: ['admin', 'superadmin'],
+    admin: ['admin'],
+    superadmin: ['admin'],
 };
 
 export default async function DashboardRoleLayout({
@@ -27,7 +24,6 @@ export default async function DashboardRoleLayout({
 }) {
     const { role } = await params;
 
-    // 1. Unknown segment → login
     if (!allAllowedSegments.includes(role)) {
         redirect('/auth');
     }
@@ -49,29 +45,35 @@ export default async function DashboardRoleLayout({
         }
     );
 
-    // 2. Logged in?
     const { data: { user } } = await supabase.auth.getUser();
+
     if (!user) {
         redirect('/auth');
     }
 
-    // 3. Fetch real role
+    // Fetch role and status from profiles
     const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, status')
         .eq('id', user.id)
         .single();
 
     const actualRole = profile?.role ?? 'influencer';
+    const actualStatus = profile?.status ?? 'pending';
 
-    // 4. Allowed pages for this real role
+    // Admins and superadmins always pass through
+    const isAdmin = actualRole === 'admin' || actualRole === 'superadmin';
+
+    // Non‑admins with pending status → redirected to pending page
+    if (!isAdmin && actualStatus !== 'active') {
+        redirect('/dashboard/pending');
+    }
+
+    // Role‑based access (existing logic)
     const allowed = roleDashboardMap[actualRole] ?? ['influencer'];
-
-    // 5. If current URL segment is not allowed, redirect to the default page for the real role
     if (!allowed.includes(role)) {
         redirect(`/dashboard/${allowed[0]}`);
     }
 
-    // 6. Render the page
     return <>{children}</>;
 }

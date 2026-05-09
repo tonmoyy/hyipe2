@@ -24,6 +24,7 @@ export default function AuthPage() {
     const [password, setPassword] = useState('');
     const [fullName, setFullName] = useState('');
     const [error, setError] = useState('');
+    const [info, setInfo] = useState('');      // ✅ friendly info message (e.g., "No account found")
     const [loading, setLoading] = useState(false);
 
     // If already logged in, redirect to dashboard
@@ -36,6 +37,7 @@ export default function AuthPage() {
     const handleSignUp = async (e?: React.FormEvent) => {
         e?.preventDefault();
         setError('');
+        setInfo('');
         setLoading(true);
 
         const { data, error: signUpError } = await supabase.auth.signUp({
@@ -46,7 +48,6 @@ export default function AuthPage() {
                     full_name: fullName,
                     role: role,
                 },
-                // ✅ Use dynamic origin for production verification
                 emailRedirectTo: `${window.location.origin}/auth/callback`,
             },
         });
@@ -57,18 +58,18 @@ export default function AuthPage() {
             return;
         }
 
-        // If user already exists (identities length 0)
+        // If user already exists
         if (data.user && data.user.identities && data.user.identities.length === 0) {
             setError('An account with this email already exists.');
             setLoading(false);
             return;
         }
 
-        // If email confirmation is required, show verify step
+        // Email confirmation required
         if (!data.session) {
             setStep('verify');
         } else {
-            // Email auto‑confirmed (if confirmation is disabled in Supabase)
+            // Email auto‑confirmed
             router.push(`/dashboard/${role}`);
         }
 
@@ -78,6 +79,7 @@ export default function AuthPage() {
     const handleLogin = async (e?: React.FormEvent) => {
         e?.preventDefault();
         setError('');
+        setInfo('');
         setLoading(true);
 
         const { data, error: loginError } = await supabase.auth.signInWithPassword({
@@ -86,6 +88,18 @@ export default function AuthPage() {
         });
 
         if (loginError) {
+            // ✅ If the error is about invalid credentials, it means no account exists → switch to sign‑up
+            if (
+                loginError.message?.includes('Invalid login credentials') ||
+                loginError.code === 'invalid_credentials'
+            ) {
+                setInfo('No account found with that email. Please sign up below.');
+                setTab('signup');
+                setPassword('');
+                setLoading(false);
+                return;
+            }
+            // Other errors (e.g., network, email not confirmed, etc.)
             setError(loginError.message);
             setLoading(false);
             return;
@@ -120,8 +134,7 @@ export default function AuthPage() {
         if (error) {
             setError(error.message);
         } else {
-            setError('');
-            alert('Verification email resent. Check your inbox.');
+            setInfo('Verification email resent. Check your inbox.');
         }
     };
 
@@ -145,7 +158,7 @@ export default function AuthPage() {
             <div className="auth-left bg-[#0D0D0B] text-white px-16 py-16 flex flex-col justify-between order-2 md:order-1">
                 <div>
                     <div className="auth-left-brand font-['Playfair_Display'] text-4xl font-bold mb-2">HYIPE</div>
-                    <div className="auth-left-sub text-xs text-white/45 leading-relaxed">Pakistan's creator marketplace</div>
+                    <div className="auth-left-sub text-xs text-white/45 leading-relaxed">Pakistan&apos;s creator marketplace</div>
                 </div>
                 <blockquote className="auth-left-quote font-['Playfair_Display'] text-2xl italic text-white/80 max-w-xs">
                     “The safest way to collaborate between brands and creators in Pakistan.”
@@ -167,7 +180,7 @@ export default function AuthPage() {
                                 className={`flex-1 py-2.5 text-xs uppercase tracking-[0.06em] font-medium ${
                                     tab === 'signup' ? 'bg-[#0D0D0B] text-white' : 'text-[#888880]'
                                 }`}
-                                onClick={() => { setTab('signup'); setError(''); }}
+                                onClick={() => { setTab('signup'); setError(''); setInfo(''); }}
                             >
                                 Sign Up
                             </button>
@@ -176,11 +189,18 @@ export default function AuthPage() {
                                 className={`flex-1 py-2.5 text-xs uppercase tracking-[0.06em] font-medium ${
                                     tab === 'login' ? 'bg-[#0D0D0B] text-white' : 'text-[#888880]'
                                 }`}
-                                onClick={() => { setTab('login'); setError(''); }}
+                                onClick={() => { setTab('login'); setError(''); setInfo(''); }}
                             >
                                 Log In
                             </button>
                         </div>
+
+                        {/* Info message (non‑error) */}
+                        {info && (
+                            <div className="bg-[#E8F0FE] text-[#1A56DB] border border-[#B6D4E8] rounded p-3 mb-4 text-xs">
+                                {info}
+                            </div>
+                        )}
 
                         {tab === 'signup' && (
                             <>

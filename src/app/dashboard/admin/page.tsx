@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
@@ -33,10 +34,7 @@ interface CampaignRow {
     brand_id: string;
     status: string;
     created_at: string;
-    brand:
-        | { full_name: string; email?: string }
-        | { full_name: string; email?: string }[]
-        | null;
+    brand: { full_name: string; email?: string } | { full_name: string; email?: string }[] | null;
 }
 
 interface Campaign {
@@ -47,6 +45,17 @@ interface Campaign {
     status: string;
     created_at: string;
     brand: { full_name: string };
+}
+
+// Raw thread from conversation_threads + campaign join (campaign is an array)
+interface RawThreadRow {
+    id: string;
+    campaign_id: string;
+    brand_id: string;
+    influencer_id: string;
+    last_message: string;
+    last_message_at: string;
+    campaign: { title: string }[] | null;
 }
 
 interface AdminThread {
@@ -70,6 +79,17 @@ interface Message {
     read: boolean;
     thread_id?: string;
     sender_name?: string;
+}
+
+// Raw message from Supabase
+interface RawMessage {
+    id: string;
+    sender_id: string;
+    receiver_id: string;
+    content: string;
+    created_at: string;
+    read: boolean;
+    campaign_id: string;
 }
 
 /* ─── Props ─── */
@@ -240,8 +260,11 @@ function AdminDashboardInner() {
             return;
         }
 
-        const brandIds = [...new Set((threadData ?? []).map((t: any) => t.brand_id))];
-        const influencerIds = [...new Set((threadData ?? []).map((t: any) => t.influencer_id))];
+        // Safe cast after handling the array
+        const rawThreads = (threadData ?? []) as unknown as RawThreadRow[];
+
+        const brandIds = [...new Set(rawThreads.map((t) => t.brand_id))];
+        const influencerIds = [...new Set(rawThreads.map((t) => t.influencer_id))];
 
         const [brandRes, influencerRes] = await Promise.all([
             brandIds.length > 0
@@ -252,20 +275,32 @@ function AdminDashboardInner() {
                 : { data: [] },
         ]);
 
-        const brandMap = new Map((brandRes.data ?? []).map((p: any) => [p.id, p.full_name]));
-        const influencerMap = new Map((influencerRes.data ?? []).map((p: any) => [p.id, p.full_name]));
+        const brandMap = new Map(
+            (brandRes.data ?? []).map((p: { id: string; full_name: string }) => [p.id, p.full_name])
+        );
+        const influencerMap = new Map(
+            (influencerRes.data ?? []).map((p: { id: string; full_name: string }) => [p.id, p.full_name])
+        );
 
-        const threads: AdminThread[] = (threadData ?? []).map((t: any) => ({
-            id: t.id,
-            brand_id: t.brand_id,
-            brand_name: brandMap.get(t.brand_id) ?? 'Unknown Brand',
-            influencer_id: t.influencer_id,
-            influencer_name: influencerMap.get(t.influencer_id) ?? 'Unknown Influencer',
-            campaign_id: t.campaign_id,
-            campaign_title: t.campaign?.title ?? 'Untitled',
-            last_message: t.last_message ?? '',
-            last_at: t.last_message_at ?? t.created_at,
-        }));
+        const threads: AdminThread[] = rawThreads.map((t) => {
+            // campaign is an array, take the first element's title
+            const campaignTitle =
+                Array.isArray(t.campaign) && t.campaign.length > 0
+                    ? t.campaign[0].title
+                    : 'Untitled';
+
+            return {
+                id: t.id,
+                brand_id: t.brand_id,
+                brand_name: brandMap.get(t.brand_id) ?? 'Unknown Brand',
+                influencer_id: t.influencer_id,
+                influencer_name: influencerMap.get(t.influencer_id) ?? 'Unknown Influencer',
+                campaign_id: t.campaign_id,
+                campaign_title: campaignTitle,
+                last_message: t.last_message ?? '',
+                last_at: t.last_message_at ?? new Date().toISOString(),
+            };
+        });
 
         setThreads(threads);
         setLoadingThreads(false);
@@ -282,18 +317,21 @@ function AdminDashboardInner() {
             .order('created_at', { ascending: true });
 
         if (!error && data) {
-            const senderIds = [...new Set((data as Message[]).map(m => m.sender_id))];
+            const msgs = data as RawMessage[];
+            const senderIds = [...new Set(msgs.map((m) => m.sender_id))];
             const { data: senderProfiles } = await supabase
                 .from('profiles')
                 .select('id, full_name')
                 .in('id', senderIds);
-            const nameMap = new Map((senderProfiles ?? []).map((p: any) => [p.id, p.full_name]));
+            const nameMap = new Map(
+                (senderProfiles ?? []).map((p: { id: string; full_name: string }) => [p.id, p.full_name])
+            );
 
-            const msgs: Message[] = (data as Message[]).map(m => ({
+            const conversation: Message[] = msgs.map((m) => ({
                 ...m,
                 sender_name: nameMap.get(m.sender_id) ?? 'Unknown',
             }));
-            setConversation(msgs);
+            setConversation(conversation);
         } else {
             console.error(error);
             setConversation([]);

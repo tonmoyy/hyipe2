@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import Link from 'next/link';
 import DashboardRoleGuard from '@/components/DashboardRoleGuard';
@@ -32,18 +32,21 @@ type CampaignFormType = {
     deliverable: string; brief: string; min_followers: string; deadline: string; requirements: string;
 };
 
-// campaign_id is now part of every message for thread scoping
 type Message = {
     id: string; sender_id: string; receiver_id: string;
     content: string; created_at: string; read: boolean;
     sender_full_name: string | null; campaign_id: string | null;
 };
 
-// A conversation thread = one (partner, campaign) pair
 type Thread = {
-    partner_id: string; partner_name: string;
-    campaign_id: string; campaign_title: string;
-    last_message: string; last_at: string; unread: boolean;
+    id?: string;          // optional, or make it required if you always have it
+    partner_id: string;
+    partner_name: string;
+    campaign_id: string;
+    campaign_title: string;
+    last_message: string;
+    last_at: string;
+    unread: boolean;
 };
 
 type Application = {
@@ -51,7 +54,6 @@ type Application = {
     influencer: { full_name: string; email: string }; campaign: { title: string };
 };
 
-// Milestone & Contract
 type Milestone = {
     id: string; contract_id: string; title: string; description: string;
     amount: number; due_date: string | null; status: 'pending' | 'submitted' | 'approved' | 'paid';
@@ -84,10 +86,17 @@ interface RawInboxMessageRow {
 }
 
 interface RawContractRow {
-    id: string; campaign_id: string; brand_id: string; influencer_id: string;
-    application_id: string; status: string; created_at: string;
-    influencer: { full_name: string }[] | { full_name: string };
-    campaign: { title: string }[] | { title: string };
+    id: string;
+    campaign_id: string;
+    brand_id: string;
+    influencer_id: string;
+    application_id: string;
+    status: string;
+    created_at: string;
+    title: string;
+    budget: number;
+    influencer: { full_name: string };   // always a single object now
+    campaign: { title: string };         // always a single object now
     milestones: Milestone[];
 }
 
@@ -106,6 +115,7 @@ function BrandDashboardInner() {
     const { user, profile, signOut } = useAuth();
     const supabase = createClient();
     const searchParams = useSearchParams();
+    const router = useRouter();
 
     const tabParam = searchParams?.get('tab') as SubView | null;
     const initialTab: SubView = tabParam && ['profile','campaigns','inbox','applications','contracts'].includes(tabParam) ? tabParam : 'profile';
@@ -146,96 +156,35 @@ function BrandDashboardInner() {
         setLoadingCampaigns(false);
     }, [user, supabase]);
 
-    // Build threads: group messages by (partner_id, campaign_id)
+    // Build threads:
     const fetchMessages = useCallback(async () => {
         if (!user) return;
         setLoadingMessages(true);
 
         const { data } = await supabase
-            .from('messages')
-            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id, sender:profiles!messages_sender_id_fkey(full_name)')
-            .or(`receiver_id.eq.${user.id},sender_id.eq.${user.id}`)
-            .neq('sender_id', user.id) // only messages FROM others for unread tracking; we still need sent messages for thread building
-            .order('created_at', { ascending: false });
+            .from('conversation_threads')
+            .select(`
+            *,
+            campaign:campaigns(title),
+            influencer:profiles!conversation_threads_influencer_id_fkey(full_name)
+        `)
+            .eq('brand_id', user.id)
+            .order('last_message_at', { ascending: false });
 
-        // Re-fetch without sender exclusion so we see full threads
-        const { data: allData } = await supabase
-            .from('messages')
-            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id, sender:profiles!messages_sender_id_fkey(full_name)')
-            .or(`receiver_id.eq.${user.id},sender_id.eq.${user.id}`)
-            .order('created_at', { ascending: false });
+        // ✅ Use the provided mapping here
+        const mappedThreads: Thread[] = (data || []).map(thread => ({
+            id: thread.id,                         // note: you must extend the Thread type to include `id`
+            partner_id: thread.influencer_id,
+            partner_name: thread.influencer?.full_name || 'Influencer',
+            campaign_id: thread.campaign_id,
+            campaign_title: thread.campaign?.title || 'Campaign',
+            last_message: thread.last_message || '',
+            last_at: thread.last_message_at || thread.created_at,
+            unread: false,                         // keep this – you can calculate unread separately
+        }));
 
-        const rows = (allData ?? []) as unknown as RawInboxMessageRow[];
-
-        // Build thread map keyed by `${partnerId}::${campaignId}`
-        const threadMap = new Map<string, Thread>();
-        rows.forEach(row => {
-            const isIncoming = row.receiver_id === user.id;
-            const partnerId = isIncoming ? row.sender_id : row.receiver_id;
-            const campaignId = row.campaign_id ?? 'none';
-            const key = `${partnerId}::${campaignId}`;
-
-            if (!threadMap.has(key)) {
-                const senderName = Array.isArray(row.sender) ? row.sender[0]?.full_name : row.sender?.full_name;
-                // For outgoing messages, sender is us; we need partner name from elsewhere
-                const partnerName = isIncoming ? (senderName || 'Unknown') : null;
-                threadMap.set(key, {
-                    partner_id: partnerId,
-                    partner_name: partnerName || '…',
-                    campaign_id: row.campaign_id ?? '',
-                    campaign_title: '', // will be resolved below
-                    last_message: row.content,
-                    last_at: row.created_at,
-                    unread: isIncoming && !row.read,
-                });
-            } else {
-                // Update unread flag if any message in thread is unread & incoming
-                const t = threadMap.get(key)!;
-                if (isIncoming && !row.read) t.unread = true;
-                // Fill partner name if we found it
-                if (!t.partner_name || t.partner_name === '…') {
-                    const senderName = Array.isArray(row.sender) ? row.sender[0]?.full_name : row.sender?.full_name;
-                    if (isIncoming && senderName) t.partner_name = senderName;
-                }
-            }
-        });
-
-        // Resolve partner names for threads where first row was outgoing
-        const partnerIds = Array.from(threadMap.values())
-            .filter(t => !t.partner_name || t.partner_name === '…')
-            .map(t => t.partner_id);
-        if (partnerIds.length > 0) {
-            const { data: profiles } = await supabase
-                .from('profiles').select('id, full_name').in('id', partnerIds);
-            (profiles ?? []).forEach((p: { id: string; full_name: string }) => {
-                threadMap.forEach(t => {
-                    if (t.partner_id === p.id && (!t.partner_name || t.partner_name === '…')) {
-                        t.partner_name = p.full_name;
-                    }
-                });
-            });
-        }
-
-        // Resolve campaign titles
-        const campaignIds = Array.from(new Set(
-            Array.from(threadMap.values()).map(t => t.campaign_id).filter(Boolean)
-        ));
-        if (campaignIds.length > 0) {
-            const { data: camps } = await supabase
-                .from('campaigns').select('id, title').in('id', campaignIds);
-            (camps ?? []).forEach((c: { id: string; title: string }) => {
-                threadMap.forEach(t => {
-                    if (t.campaign_id === c.id) t.campaign_title = c.title;
-                });
-            });
-        }
-
-        const sorted = Array.from(threadMap.values())
-            .sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime());
-        setThreads(sorted);
+        setThreads(mappedThreads);
         setLoadingMessages(false);
-        // suppress unused warning
-        void data;
     }, [user, supabase]);
 
     const fetchApplications = useCallback(async () => {
@@ -267,24 +216,65 @@ function BrandDashboardInner() {
     const fetchContracts = useCallback(async () => {
         if (!user) return;
         setLoadingContracts(true);
-        const { data } = await supabase
+
+        // 1. Fetch contracts + milestones (no nested joins)
+        const { data: contractsData, error } = await supabase
             .from('contracts')
-            .select('id, campaign_id, brand_id, influencer_id, application_id, status, created_at, influencer:profiles!contracts_influencer_id_fkey(full_name), campaign:campaigns(title), milestones(id, contract_id, title, description, amount, due_date, status, order_index)')
-            .eq('brand_id', user.id)
+            .select(`
+            id,
+            campaign_id,
+            brand_id,
+            influencer_id,
+            application_id,
+            status,
+            created_at,
+            title,
+            budget,
+            milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
+        `)
+            .eq('brand_id', user.id)        // brand dashboard → filter by brand_id
             .order('created_at', { ascending: false });
 
-        const rows = (data ?? []) as unknown as RawContractRow[];
-        setContracts(rows.map(row => ({
-            id: row.id, campaign_id: row.campaign_id, brand_id: row.brand_id,
-            influencer_id: row.influencer_id, application_id: row.application_id,
-            status: row.status as Contract['status'], created_at: row.created_at,
-            influencer_name: Array.isArray(row.influencer) ? row.influencer[0]?.full_name ?? 'Unknown' : (row.influencer as { full_name: string })?.full_name ?? 'Unknown',
-            campaign_title: Array.isArray(row.campaign) ? row.campaign[0]?.title ?? 'Untitled' : (row.campaign as { title: string })?.title ?? 'Untitled',
+        if (error) {
+            console.error(error);
+            setLoadingContracts(false);
+            return;
+        }
+
+        // 2. Collect IDs for influencer and campaign
+        const influencerIds = [...new Set((contractsData ?? []).map(c => c.influencer_id))];
+        const campaignIds   = [...new Set((contractsData ?? []).map(c => c.campaign_id))];
+
+        // 3. Fetch names in parallel
+        const [influencerRes, campaignRes] = await Promise.all([
+            influencerIds.length > 0
+                ? supabase.from('profiles').select('id, full_name').in('id', influencerIds)
+                : { data: [] },
+            campaignIds.length > 0
+                ? supabase.from('campaigns').select('id, title').in('id', campaignIds)
+                : { data: [] },
+        ]);
+
+        const influencerMap = new Map((influencerRes.data ?? []).map(p => [p.id, p.full_name]));
+        const campaignMap   = new Map((campaignRes.data ?? []).map(c => [c.id, c.title]));
+
+        // 4. Merge into Contract objects with correct field names
+        const contracts: Contract[] = (contractsData ?? []).map(row => ({
+            id: row.id,
+            campaign_id: row.campaign_id,
+            brand_id: row.brand_id,
+            influencer_id: row.influencer_id,
+            application_id: row.application_id,
+            status: row.status as Contract['status'],
+            created_at: row.created_at,
+            influencer_name: influencerMap.get(row.influencer_id) ?? 'Unknown', // ← influencer, not brand
+            campaign_title: campaignMap.get(row.campaign_id) ?? 'Untitled',
             milestones: (row.milestones ?? []).sort((a, b) => a.order_index - b.order_index),
-        })));
+        }));
+
+        setContracts(contracts);
         setLoadingContracts(false);
     }, [user, supabase]);
-
     // Initial load
     useEffect(() => {
         if (initialTab === 'campaigns') fetchCampaigns();
@@ -342,43 +332,113 @@ function BrandDashboardInner() {
 
         // 1. Update application status
         const { error: appErr } = await supabase
-            .from('applications').update({ status: 'accepted' }).eq('id', appId);
-        if (appErr) { alert(appErr.message); return; }
+            .from('applications')
+            .update({ status: 'accepted' })
+            .eq('id', appId);
+        if (appErr) {
+            alert('Status update failed: ' + appErr.message);
+            console.error(appErr);
+            return;
+        }
 
-        // 2. Create contract record
+        // 2. Fetch the campaign for required fields
+        const { data: campaign, error: campErr } = await supabase
+            .from('campaigns')
+            .select('title, budget')
+            .eq('id', app.campaign_id)
+            .single();
+
+        if (campErr || !campaign) {
+            alert('Could not fetch campaign: ' + (campErr?.message || 'not found'));
+            console.error(campErr);
+            return;
+        }
+
+        // 3. Create contract – explicitly supply ALL possibly required columns
+        const insertPayload = {
+            campaign_id: app.campaign_id,
+            brand_id: user!.id,
+            influencer_id: app.influencer_id,
+            application_id: appId,
+            status: 'active',
+            title: campaign.title || 'Untitled',
+            budget: campaign.budget || 0,
+            // If your contracts table has other NOT NULL columns, add defaults here
+        };
+
+        console.log('Inserting contract:', insertPayload);
+
         const { data: contractData, error: contractErr } = await supabase
             .from('contracts')
-            .insert({
-                campaign_id: app.campaign_id,
-                brand_id: user!.id,
-                influencer_id: app.influencer_id,
-                application_id: appId,
-                status: 'active',
-            })
+            .insert(insertPayload)
             .select('id')
             .single();
-        if (contractErr) { console.error('Contract creation failed:', contractErr.message); }
 
-        // 3. Send campaign-scoped congratulations message
-        await supabase.from('messages').insert({
-            sender_id: user!.id,
-            receiver_id: app.influencer_id,
-            campaign_id: app.campaign_id,
-            content: `Congratulations! Your application for "${app.campaign?.title}" has been accepted. We'll be in touch with milestones and next steps.`,
-            read: false,
-        });
+        if (contractErr) {
+            alert('Contract creation failed: ' + contractErr.message);
+            console.error('Contract insert error:', contractErr);
+            return;
+        }
 
-        // 4. Switch to contracts tab so brand can add milestones immediately
+        console.log('Contract created:', contractData);
+
+        // 4. Refresh and switch tab
         await fetchContracts();
         await fetchApplications();
-        if (contractData?.id) {
-            switchTab('contracts');
-        }
+        if (contractData?.id) switchTab('contracts');
     };
 
     const handleRejectApplication = async (appId: string) => {
         await supabase.from('applications').update({ status: 'rejected' }).eq('id', appId);
         fetchApplications();
+    };
+
+    // NEW: Navigate to inbox for a specific application so brand can start a chat
+
+    const handleStartConversation = async (
+        applicationId: string,
+        influencerId: string,
+        campaignId: string
+    ) => {
+        const app = applications.find(a => a.id === applicationId);
+
+        if (!app) return;
+
+        const { data: existing } = await supabase
+            .from('conversation_threads')
+            .select('*')
+            .eq('campaign_id', campaignId)
+            .eq('brand_id', user!.id)
+            .eq('influencer_id', influencerId)
+            .maybeSingle();
+
+        let threadId = existing?.id;
+
+        if (!existing) {
+            const { data: created, error } = await supabase
+                .from('conversation_threads')
+                .insert({
+                    campaign_id: campaignId,
+                    brand_id: user!.id,
+                    influencer_id: influencerId,
+                    started_by_brand: true,
+                    last_message: 'Conversation started',
+                    last_message_at: new Date().toISOString(),
+                })
+                .select()
+                .single();
+
+            if (error) {
+                alert(error.message);
+                return;
+            }
+
+            threadId = created.id;
+        }
+
+        router.push(
+            `/dashboard/brand?tab=inbox&thread=${threadId}`
+        );
     };
 
     // Mark all messages in a thread (partner + campaign) as read
@@ -458,6 +518,7 @@ function BrandDashboardInner() {
                         <ApplicationsSection
                             applications={applications} loading={loadingApplications}
                             onAccept={handleAcceptApplication} onReject={handleRejectApplication}
+                            onMessage={handleStartConversation}
                         />
                     </div>
                 )}
@@ -711,9 +772,10 @@ function CampaignsSection({ campaigns, loading, openCampModal }: {
 }
 
 /* ─── Applications Section ─── */
-function ApplicationsSection({ applications, loading, onAccept, onReject }: {
+function ApplicationsSection({ applications, loading, onAccept, onReject, onMessage }: {
     applications: Application[]; loading: boolean;
     onAccept: (id: string) => void; onReject: (id: string) => void;
+    onMessage: (appId: string, influencerId: string, campaignId: string) => void;
 }) {
     const pendingApps = applications.filter(a => a.status === 'applied');
     const acceptedApps = applications.filter(a => a.status === 'accepted');
@@ -756,8 +818,14 @@ function ApplicationsSection({ applications, loading, onAccept, onReject }: {
                                     <div className="flex flex-col gap-2 items-end flex-shrink-0">
                                         {statusBadge(app.status)}
                                         <div className="flex gap-2">
-                                            <button onClick={() => onAccept(app.id)} className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Accept → Contract</button>
+                                            <button
+                                                onClick={() => onAccept(app.id)}
+                                                className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase"
+                                            >
+                                                Accept → Start Contract
+                                            </button>
                                             <button onClick={() => onReject(app.id)} className="border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
+                                            <button onClick={() => onMessage(app.id, app.influencer_id, app.campaign_id)} className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1 text-[10px] uppercase">Message</button>
                                         </div>
                                     </div>
                                 </div>
@@ -1021,6 +1089,7 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
 }
 
 /* ─── Brand Inbox Section ─── */
+/* ─── Brand Inbox Section ─── */
 function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRefreshThreads, initialPartnerId, initialCampaignId }: {
     threads: Thread[]; loading: boolean; currentUserId: string;
     onThreadRead: (partnerId: string, campaignId: string) => Promise<void>;
@@ -1072,9 +1141,14 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
         setTimeout(() => inputRef.current?.focus(), 100);
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
-    // Auto-open thread from URL params
+    // Auto‑open thread from URL params
+    // Auto‑open thread when threads become available after mount
     useEffect(() => {
-        if (initialPartnerId && threads.length > 0 && !initialLoadDone.current) {
+        if (
+            !initialLoadDone.current &&
+            initialPartnerId &&
+            threads.length > 0
+        ) {
             const thread = threads.find(t =>
                 t.partner_id === initialPartnerId &&
                 (!initialCampaignId || t.campaign_id === initialCampaignId)
@@ -1084,28 +1158,66 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                 initialLoadDone.current = true;
             }
         }
-    }, [initialPartnerId, initialCampaignId, threads, loadConversation]);
+    }, [threads, initialPartnerId, initialCampaignId, loadConversation]);
+
+    // ✅ Fix: await markAllRead BEFORE refreshing threads so the DB is updated first
+    useEffect(() => {
+        const markAllReadAndRefresh = async () => {
+            await supabase
+                .from('messages')
+                .update({ read: true })
+                .eq('receiver_id', currentUserId)
+                .eq('read', false);
+            // Instantly clear the header badge
+            window.dispatchEvent(new Event('inbox:read'));
+            // Now fetch threads – they will see all messages as read
+            await onRefreshThreads();
+        };
+        markAllReadAndRefresh();
+    }, [currentUserId, supabase, onRefreshThreads]);
 
     const handleSendReply = async () => {
         if (!replyText.trim() || !selectedThread) return;
-        const newMsg = {
-            sender_id: currentUserId,
-            receiver_id: selectedThread.partner_id,
-            content: replyText.trim(),
-            campaign_id: selectedThread.campaign_id || null,
-            read: false,
-        };
-        const { data, error } = await supabase.from('messages').insert(newMsg).select('id, created_at').single();
-        if (error) return;
 
-        setConversation(prev => [...prev, {
-            id: data.id, sender_id: currentUserId, receiver_id: selectedThread.partner_id,
-            content: newMsg.content, created_at: data.created_at, read: false,
-            campaign_id: selectedThread.campaign_id, sender_full_name: 'You',
-        }]);
+        const body = replyText.trim();
+
+        const { data, error } = await supabase
+            .from('messages')
+            .insert({
+                thread_id: selectedThread.id,
+                sender_id: currentUserId,
+                receiver_id: selectedThread.partner_id,
+                campaign_id: selectedThread.campaign_id,
+                content: body,
+                read: false,
+            })
+            .select()
+            .single();
+
+        if (error) {
+            alert(error.message);
+            return;
+        }
+
+        await supabase
+            .from('conversation_threads')
+            .update({
+                last_message: body,
+                last_message_at: new Date().toISOString(),
+            })
+            .eq('id', selectedThread.id);
+
+        setConversation(prev => [
+            ...prev,
+            {
+                ...data,
+                sender_full_name: 'You',
+            },
+        ]);
+
         setReplyText('');
+
         setTimeout(scrollToBottom, 30);
-        inputRef.current?.focus();
     };
 
     return (
@@ -1166,7 +1278,7 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                                     {selectedThread.partner_name.slice(0, 2).toUpperCase()}
                                 </div>
                                 <div>
-                                    <div className="text-sm font-semibold">{selectedThread.partner_name}</div>
+                                    <div className="text-sm font-semibold">{selectedThread.campaign_title}</div>
                                     {selectedThread.campaign_title && (
                                         <div className="text-[10px] text-[#5E7A0A] uppercase tracking-[0.04em] font-medium">{selectedThread.campaign_title}</div>
                                     )}

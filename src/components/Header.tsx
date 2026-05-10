@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import Link from 'next/link';
@@ -16,6 +15,7 @@ type Message = {
     created_at: string;
     read: boolean;
     sender_id: string;
+    campaign_id: string | null;
 };
 
 export default function Header() {
@@ -35,15 +35,30 @@ export default function Header() {
                 ? '/dashboard/brand?tab=inbox'
                 : null;
 
+    // Lightweight count fetch – used by the inbox:read listener
+    const fetchUnreadCount = useCallback(async () => {
+        if (!user) {
+            setUnreadCount(0);
+            return;
+        }
+        const { count, error } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('receiver_id', user.id)
+            .neq('sender_id', user.id)   // safety guard
+            .eq('read', false);
+        if (!error) setUnreadCount(count || 0);
+    }, [user, supabase]);
+
+    // Full fetch – builds popover list and updates badge
     const fetchNotifications = useCallback(async () => {
         if (!user) return;
 
         const { data, error } = await supabase
             .from('messages')
-            .select('id, content, created_at, read, sender_id')
+            .select('id, content, created_at, read, sender_id, campaign_id')
             .eq('receiver_id', user.id)
             .eq('read', false)
-            // FIX 1: Exclude messages the user sent to themselves
             .neq('sender_id', user.id)
             .order('created_at', { ascending: false });
 
@@ -56,21 +71,22 @@ export default function Header() {
 
         const unread = (data ?? []) as Message[];
 
-        const latestPerSender = new Map<string, Message>();
+        // One entry per (sender, campaign) to match thread groups
+        const threadMap = new Map<string, Message>();
         unread.forEach((msg) => {
-            if (!latestPerSender.has(msg.sender_id)) {
-                latestPerSender.set(msg.sender_id, msg);
-            }
+            const key = `${msg.sender_id}::${msg.campaign_id ?? 'none'}`;
+            if (!threadMap.has(key)) threadMap.set(key, msg);
         });
 
-        const latestMessages = Array.from(latestPerSender.values())
+        const latestMessages = Array.from(threadMap.values())
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .slice(0, 5);
 
         setMessages(latestMessages);
-        setUnreadCount(latestPerSender.size);
+        setUnreadCount(threadMap.size);
     }, [user, supabase]);
 
+    // Keep ref in sync for real‑time listener
     useEffect(() => {
         fetchNotificationsRef.current = fetchNotifications;
     }, [fetchNotifications]);
@@ -84,21 +100,16 @@ export default function Header() {
         }
     }, [user]);
 
-    // Initial fetch
+    // Initial fetch when user becomes available
     useEffect(() => {
-        if (user) {
-            fetchNotifications();
-        }
+        if (user) fetchNotifications();
     }, [user, fetchNotifications]);
 
-    // Real-time subscription – only listen for INSERT events for messages
-    // sent BY OTHERS to this user (excludes own messages via sender_id filter)
+    // Real‑time INSERT listener
     useEffect(() => {
         if (!user) return;
 
-        if (channelRef.current) {
-            supabase.removeChannel(channelRef.current);
-        }
+        if (channelRef.current) supabase.removeChannel(channelRef.current);
 
         const channel = supabase
             .channel(`header-${user.id}`)
@@ -108,18 +119,9 @@ export default function Header() {
                     event: 'INSERT',
                     schema: 'public',
                     table: 'messages',
-                    // FIX 2: Only trigger badge for messages received FROM others,
-                    // not messages this user sends (which also have receiver_id set).
-                    // We filter by receiver_id here and exclude own sender in the fetch.
                     filter: `receiver_id=eq.${user.id}`,
                 },
-                (payload) => {
-                    // FIX 3: Guard in the realtime callback – ignore own messages
-                    if (payload.new && (payload.new as { sender_id: string }).sender_id === user.id) {
-                        return;
-                    }
-                    fetchNotificationsRef.current();
-                }
+                () => fetchNotificationsRef.current()
             )
             .subscribe();
 
@@ -130,13 +132,16 @@ export default function Header() {
         };
     }, [user, supabase]);
 
-    // FIX 4: Listen for custom "inbox:read" event dispatched by the dashboard
-    // to clear the badge whenever messages are marked as read in the inbox UI
+    // Listen for inbox:read – clear badge and re‑fetch actual count
+    // Listen for inbox:read – clear badge immediately and then re‑fetch
     useEffect(() => {
-        const handler = () => fetchNotificationsRef.current();
+        const handler = () => {
+            setUnreadCount(0);   // optimistic clear
+            fetchUnreadCount();  // confirm (usually stays 0)
+        };
         window.addEventListener('inbox:read', handler);
         return () => window.removeEventListener('inbox:read', handler);
-    }, []);
+    }, [fetchUnreadCount]);
 
     return (
         <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-[#0D0D0B] text-white text-[11px] tracking-[0.08em] uppercase font-medium">
@@ -178,7 +183,7 @@ export default function Header() {
                             Dashboard
                         </Link>
 
-                        {/* Inbox Popover */}
+                        {/* Inbox popover */}
                         {inboxPath && (
                             <div className="relative">
                                 <button
@@ -216,13 +221,15 @@ export default function Header() {
                                                 ) : (
                                                     messages.map((m) => (
                                                         <Link
-                                                            key={m.sender_id}
-                                                            href={`${inboxPath}&partner=${m.sender_id}`}
+                                                            key={m.id}
+                                                            href={`${inboxPath}&partner=${m.sender_id}&campaign=${m.campaign_id ?? ''}`}
                                                             onClick={() => setOpen(false)}
                                                             className="block px-4 py-3 border-b border-gray-50 transition-colors hover:bg-gray-100 bg-blue-50 border-l-4 border-l-blue-500"
                                                         >
                                                             <div className="flex justify-between items-start gap-2">
-                                                                <p className="text-sm text-gray-800 normal-case tracking-normal line-clamp-2 font-medium">{m.content}</p>
+                                                                <p className="text-sm text-gray-800 normal-case tracking-normal line-clamp-2 font-medium">
+                                                                    {m.content}
+                                                                </p>
                                                                 <span className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1" />
                                                             </div>
                                                             <span className="text-xs text-gray-400 mt-1 block normal-case tracking-normal">

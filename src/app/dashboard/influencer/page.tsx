@@ -23,9 +23,14 @@ type Message = {
 };
 
 type Thread = {
-    partner_id: string; partner_name: string;
-    campaign_id: string; campaign_title: string;
-    last_message: string; last_at: string; unread: boolean;
+    id?: string;           // <-- add this
+    partner_id: string;
+    partner_name: string;
+    campaign_id: string;
+    campaign_title: string;
+    last_message: string;
+    last_at: string;
+    unread: boolean;
 };
 
 type Milestone = {
@@ -61,10 +66,17 @@ interface RawMessageRow {
 }
 
 interface RawContractRow {
-    id: string; campaign_id: string; brand_id: string; influencer_id: string;
-    application_id: string; status: string; created_at: string;
-    brand: { full_name: string }[] | { full_name: string };
-    campaign: { title: string }[] | { title: string };
+    id: string;
+    campaign_id: string;
+    brand_id: string;
+    influencer_id: string;
+    application_id: string;
+    status: string;
+    created_at: string;
+    title: string;
+    budget: number;
+    brand: { full_name: string };      // single object
+    campaign: { title: string };       // single object
     milestones: Milestone[];
 }
 
@@ -124,87 +136,70 @@ function InfluencerDashboardInner() {
         if (!user) return;
         setLoadingMessages(true);
 
-        const { data: allData } = await supabase
-            .from('messages')
-            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id, sender:profiles!messages_sender_id_fkey(full_name)')
-            .or(`receiver_id.eq.${user.id},sender_id.eq.${user.id}`)
-            .order('created_at', { ascending: false });
+        const { data } = await supabase
+            .from('conversation_threads')
+            .select(`
+            *,
+            campaign:campaigns(title),
+            brand:profiles!conversation_threads_brand_id_fkey(full_name)
+        `)
+            .eq('influencer_id', user.id)          // was currentUser.id – fixed
+            .eq('started_by_brand', true)
+            .order('last_message_at', { ascending: false });
 
-        const rows = (allData ?? []) as unknown as RawMessageRow[];
-        const threadMap = new Map<string, Thread>();
+        const mappedThreads: Thread[] = (data || []).map(thread => ({
+            id: thread.id,
+            partner_id: thread.brand_id,
+            partner_name: thread.brand?.full_name || 'Brand',
+            campaign_id: thread.campaign_id,
+            campaign_title: thread.campaign?.title || 'Campaign',
+            last_message: thread.last_message || '',
+            last_at: thread.last_message_at || thread.created_at,
+            unread: false,   // you may later calculate unread from messages
+        }));
 
-        rows.forEach(row => {
-            const isIncoming = row.receiver_id === user.id;
-            const partnerId = isIncoming ? row.sender_id : row.receiver_id;
-            const campaignId = row.campaign_id ?? 'none';
-            const key = `${partnerId}::${campaignId}`;
-
-            if (!threadMap.has(key)) {
-                const senderName = Array.isArray(row.sender) ? row.sender[0]?.full_name : (row.sender as { full_name: string } | null)?.full_name;
-                threadMap.set(key, {
-                    partner_id: partnerId,
-                    partner_name: isIncoming ? (senderName || 'Unknown') : '…',
-                    campaign_id: row.campaign_id ?? '',
-                    campaign_title: '',
-                    last_message: row.content,
-                    last_at: row.created_at,
-                    unread: isIncoming && !row.read,
-                });
-            } else {
-                const t = threadMap.get(key)!;
-                if (isIncoming && !row.read) t.unread = true;
-                if ((!t.partner_name || t.partner_name === '…') && isIncoming) {
-                    const sn = Array.isArray(row.sender) ? row.sender[0]?.full_name : (row.sender as { full_name: string } | null)?.full_name;
-                    if (sn) t.partner_name = sn;
-                }
-            }
-        });
-
-        // Resolve partner names where unknown (outgoing first messages)
-        const unknownIds = Array.from(threadMap.values())
-            .filter(t => !t.partner_name || t.partner_name === '…')
-            .map(t => t.partner_id);
-        if (unknownIds.length > 0) {
-            const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', unknownIds);
-            (profiles ?? []).forEach((p: { id: string; full_name: string }) => {
-                threadMap.forEach(t => { if (t.partner_id === p.id && (!t.partner_name || t.partner_name === '…')) t.partner_name = p.full_name; });
-            });
-        }
-
-        // Resolve campaign titles
-        const campaignIds = Array.from(new Set(Array.from(threadMap.values()).map(t => t.campaign_id).filter(Boolean)));
-        if (campaignIds.length > 0) {
-            const { data: camps } = await supabase.from('campaigns').select('id, title').in('id', campaignIds);
-            (camps ?? []).forEach((c: { id: string; title: string }) => {
-                threadMap.forEach(t => { if (t.campaign_id === c.id) t.campaign_title = c.title; });
-            });
-        }
-
-        setThreads(Array.from(threadMap.values()).sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime()));
+        setThreads(mappedThreads);
         setLoadingMessages(false);
     }, [user, supabase]);
 
     const fetchContracts = useCallback(async () => {
         if (!user) return;
         setLoadingContracts(true);
+
         const { data } = await supabase
             .from('contracts')
-            .select('id, campaign_id, brand_id, influencer_id, application_id, status, created_at, brand:profiles!contracts_brand_id_fkey(full_name), campaign:campaigns(title), milestones(id, contract_id, title, description, amount, due_date, status, order_index)')
+            .select(`
+            id,
+            campaign_id,
+            brand_id,
+            influencer_id,
+            application_id,
+            status,
+            created_at,
+            title,
+            budget,
+            brand:brand_id ( full_name ),
+            campaign:campaign_id ( title ),
+            milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
+        `)
             .eq('influencer_id', user.id)
             .order('created_at', { ascending: false });
 
         const rows = (data ?? []) as unknown as RawContractRow[];
         setContracts(rows.map(row => ({
-            id: row.id, campaign_id: row.campaign_id, brand_id: row.brand_id,
-            influencer_id: row.influencer_id, application_id: row.application_id,
-            status: row.status as Contract['status'], created_at: row.created_at,
-            brand_name: Array.isArray(row.brand) ? row.brand[0]?.full_name ?? 'Unknown' : (row.brand as { full_name: string })?.full_name ?? 'Unknown',
-            campaign_title: Array.isArray(row.campaign) ? row.campaign[0]?.title ?? 'Untitled' : (row.campaign as { title: string })?.title ?? 'Untitled',
+            id: row.id,
+            campaign_id: row.campaign_id,
+            brand_id: row.brand_id,
+            influencer_id: row.influencer_id,
+            application_id: row.application_id,
+            status: row.status as Contract['status'],
+            created_at: row.created_at,
+            brand_name: row.brand?.full_name ?? 'Unknown',
+            campaign_title: row.campaign?.title ?? 'Untitled',
             milestones: (row.milestones ?? []).sort((a, b) => a.order_index - b.order_index),
         })));
         setLoadingContracts(false);
     }, [user, supabase]);
-
     // Initial load
     useEffect(() => {
         if (initialTab === 'projects') fetchProjects();
@@ -521,12 +516,23 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState<string | null>(null);
 
-    const handleSubmitMilestone = async (milestoneId: string) => {
-        setSubmitting(milestoneId);
-        const { error } = await supabase.from('milestones').update({ status: 'submitted' }).eq('id', milestoneId);
-        if (error) alert(error.message);
-        setSubmitting(null);
-        onRefresh();
+    const submitMilestone = async (
+        milestoneId: string,
+        text: string,
+        url: string
+    ) => {
+        const { error } = await supabase
+            .from('milestones')
+            .update({
+                status: 'submitted',
+                submission_text: text,
+                submission_url: url,
+            })
+            .eq('id', milestoneId);
+
+        if (!error) {
+            onRefresh();
+        }
     };
 
     const milestoneStatusBadge = (status: Milestone['status']) => {
@@ -558,87 +564,98 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                 </div>
             ) : (
                 <>
-                    {activeContracts.length > 0 && (
-                        <div className="mb-8">
-                            <h3 className="font-medium text-sm mb-3">Active ({activeContracts.length})</h3>
-                            <div className="flex flex-col gap-4">
-                                {activeContracts.map(contract => {
-                                    const isOpen = expandedId === contract.id;
-                                    const totalBudget = contract.milestones.reduce((s, m) => s + m.amount, 0);
-                                    const paidAmount = contract.milestones.filter(m => m.status === 'paid').reduce((s, m) => s + m.amount, 0);
-                                    return (
-                                        <div key={contract.id} className="bg-white border border-[#E5E5DF] rounded">
-                                            <div className="p-4 flex justify-between items-start cursor-pointer" onClick={() => setExpandedId(isOpen ? null : contract.id)}>
-                                                <div>
-                                                    <h4 className="text-sm font-medium">{contract.campaign_title}</h4>
-                                                    <div className="text-xs text-[#888880] mt-0.5">Brand: {contract.brand_name}</div>
-                                                    <div className="text-xs text-[#888880] mt-0.5">
-                                                        {contract.milestones.length} milestone{contract.milestones.length !== 1 ? 's' : ''} · Rs. {paidAmount.toLocaleString()} / {totalBudget.toLocaleString()} received
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span>
-                                                    <span className="text-xs text-[#888880]">{isOpen ? '▲' : '▼'}</span>
+                    <div className="mb-8">
+                        <h3 className="font-medium text-sm mb-3">Active ({activeContracts.length})</h3>
+                        <div className="flex flex-col gap-4">
+                            {activeContracts.map(contract => {
+                                const isOpen = expandedId === contract.id;
+                                const totalBudget = contract.milestones.reduce((s, m) => s + m.amount, 0);
+                                const paidAmount = contract.milestones.filter(m => m.status === 'paid').reduce((s, m) => s + m.amount, 0);
+                                return (
+                                    <div key={contract.id} className="bg-white border border-[#E5E5DF] rounded">
+                                        <div className="p-4 flex justify-between items-start cursor-pointer" onClick={() => setExpandedId(isOpen ? null : contract.id)}>
+                                            <div>
+                                                <h4 className="text-sm font-medium">{contract.campaign_title}</h4>
+                                                <div className="text-xs text-[#888880] mt-0.5">Brand: {contract.brand_name}</div>
+                                                <div className="text-xs text-[#888880] mt-0.5">
+                                                    {contract.milestones.length} milestone{contract.milestones.length !== 1 ? 's' : ''} · Rs. {paidAmount.toLocaleString()} / {totalBudget.toLocaleString()} received
                                                 </div>
                                             </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span>
+                                                <span className="text-xs text-[#888880]">{isOpen ? '▲' : '▼'}</span>
+                                            </div>
+                                        </div>
 
-                                            {isOpen && (
-                                                <div className="border-t border-[#E5E5DF] p-4">
-                                                    {totalBudget > 0 && (
-                                                        <div className="mb-4">
-                                                            <div className="flex justify-between text-xs text-[#888880] mb-1">
-                                                                <span>Payment received</span>
-                                                                <span>Rs. {paidAmount.toLocaleString()} / {totalBudget.toLocaleString()}</span>
-                                                            </div>
-                                                            <div className="h-1.5 bg-[#F0F0EA] rounded overflow-hidden">
-                                                                <div className="h-full bg-[#0D0D0B] rounded transition-all" style={{ width: `${totalBudget > 0 ? Math.round((paidAmount / totalBudget) * 100) : 0}%` }} />
-                                                            </div>
+                                        {isOpen && (
+                                            <div className="border-t border-[#E5E5DF] p-4">
+                                                {totalBudget > 0 && (
+                                                    <div className="mb-4">
+                                                        <div className="flex justify-between text-xs text-[#888880] mb-1">
+                                                            <span>Payment received</span>
+                                                            <span>Rs. {paidAmount.toLocaleString()} / {totalBudget.toLocaleString()}</span>
                                                         </div>
-                                                    )}
+                                                        <div className="h-1.5 bg-[#F0F0EA] rounded overflow-hidden">
+                                                            <div className="h-full bg-[#0D0D0B] rounded transition-all" style={{ width: `${totalBudget > 0 ? Math.round((paidAmount / totalBudget) * 100) : 0}%` }} />
+                                                        </div>
+                                                    </div>
+                                                )}
 
-                                                    {contract.milestones.length === 0 ? (
-                                                        <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded p-3 text-xs text-[#7A5200]">
-                                                            ⏳ The brand hasn&apos;t set any milestones yet. Check back soon.
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex flex-col gap-2">
-                                                            {contract.milestones.map((m, idx) => (
-                                                                <div key={m.id} className="border border-[#E5E5DF] rounded p-3 flex justify-between items-start gap-3">
-                                                                    <div className="flex-1">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-xs text-[#888880] font-medium">#{idx + 1}</span>
-                                                                            <span className="text-sm font-medium">{m.title}</span>
-                                                                        </div>
-                                                                        {m.description && <div className="text-xs text-[#888880] mt-0.5">{m.description}</div>}
-                                                                        <div className="flex gap-3 mt-1 text-xs text-[#888880]">
-                                                                            <span>Rs. {m.amount.toLocaleString()}</span>
-                                                                            {m.due_date && <span>Due: {new Date(m.due_date).toLocaleDateString()}</span>}
-                                                                        </div>
+                                                {contract.milestones.length === 0 ? (
+                                                    <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded p-3 text-xs text-[#7A5200]">
+                                                        ⏳ The brand hasn&apos;t set any milestones yet. Check back soon.
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col gap-2">
+                                                        {contract.milestones.map((m, idx) => (
+                                                            <div key={m.id} className="border border-[#E5E5DF] rounded p-3 flex justify-between items-start gap-3">
+                                                                <div className="flex-1">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-xs text-[#888880] font-medium">#{idx + 1}</span>
+                                                                        <span className="text-sm font-medium">{m.title}</span>
                                                                     </div>
-                                                                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                                                                        {milestoneStatusBadge(m.status)}
-                                                                        {m.status === 'pending' && (
-                                                                            <button
-                                                                                onClick={() => handleSubmitMilestone(m.id)}
-                                                                                disabled={submitting === m.id}
-                                                                                className="border border-[#3040A0] text-[#3040A0] bg-[#EEF2FF] px-2 py-0.5 text-[10px] uppercase disabled:opacity-50"
-                                                                            >
-                                                                                {submitting === m.id ? '...' : 'Mark Complete'}
-                                                                            </button>
-                                                                        )}
+                                                                    {m.description && <div className="text-xs text-[#888880] mt-0.5">{m.description}</div>}
+                                                                    <div className="flex gap-3 mt-1 text-xs text-[#888880]">
+                                                                        <span>Rs. {m.amount.toLocaleString()}</span>
+                                                                        {m.due_date && <span>Due: {new Date(m.due_date).toLocaleDateString()}</span>}
                                                                     </div>
                                                                 </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                                                                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                                                                    {milestoneStatusBadge(m.status)}
+                                                                    {m.status === 'pending' && (
+                                                                        <button
+                                                                            onClick={async () => {
+                                                                                const submissionText = prompt('Enter submission details') || '';
+                                                                                const submissionUrl = prompt('Enter submission URL (optional)') || '';
+
+                                                                                setSubmitting(m.id);
+
+                                                                                await submitMilestone(
+                                                                                    m.id,
+                                                                                    submissionText,
+                                                                                    submissionUrl
+                                                                                );
+
+                                                                                setSubmitting(null);
+                                                                            }}
+                                                                            disabled={submitting === m.id}
+                                                                            className="border border-[#0D0D0B] text-[#0D0D0B] px-2 py-0.5 text-[10px] uppercase disabled:opacity-50"
+                                                                        >
+                                                                            {submitting === m.id ? 'Submitting...' : 'Submit Work'}
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
-                    )}
+                    </div>
 
                     {completedContracts.length > 0 && (
                         <div>
@@ -662,6 +679,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
     );
 }
 
+/* ─── Inbox Section ─── */
 /* ─── Inbox Section ─── */
 function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefreshThreads, initialPartnerId, initialCampaignId }: {
     threads: Thread[]; loading: boolean; currentUserId: string;
@@ -713,8 +731,14 @@ function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefresh
         setTimeout(() => inputRef.current?.focus(), 100);
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
+    // Auto‑open thread from URL params
+    // Auto‑open thread when threads become available after mount
     useEffect(() => {
-        if (initialPartnerId && threads.length > 0 && !initialLoadDone.current) {
+        if (
+            !initialLoadDone.current &&
+            initialPartnerId &&
+            threads.length > 0
+        ) {
             const thread = threads.find(t =>
                 t.partner_id === initialPartnerId &&
                 (!initialCampaignId || t.campaign_id === initialCampaignId)
@@ -724,7 +748,21 @@ function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefresh
                 initialLoadDone.current = true;
             }
         }
-    }, [initialPartnerId, initialCampaignId, threads, loadConversation]);
+    }, [threads, initialPartnerId, initialCampaignId, loadConversation]);
+
+    // ✅ Fix: await markAllRead BEFORE refreshing threads
+    useEffect(() => {
+        const markAllReadAndRefresh = async () => {
+            await supabase
+                .from('messages')
+                .update({ read: true })
+                .eq('receiver_id', currentUserId)
+                .eq('read', false);
+            window.dispatchEvent(new Event('inbox:read'));
+            await onRefreshThreads();
+        };
+        markAllReadAndRefresh();
+    }, [currentUserId, supabase, onRefreshThreads]);
 
     const handleSendReply = async () => {
         if (!replyText.trim() || !selectedThread) return;

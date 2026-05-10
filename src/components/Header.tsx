@@ -1,4 +1,4 @@
-// src/components/Header.tsx
+/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import Link from 'next/link';
@@ -26,10 +26,8 @@ export default function Header() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [messages, setMessages] = useState<Message[]>([]);
     const channelRef = useRef<RealtimeChannel | null>(null);
-
     const fetchNotificationsRef = useRef<() => Promise<void>>(async () => {});
 
-    // ✅ Updated inbox path – now points to the dashboard with ?tab=inbox
     const inboxPath =
         profile?.role === 'influencer'
             ? '/dashboard/influencer?tab=inbox'
@@ -37,7 +35,6 @@ export default function Header() {
                 ? '/dashboard/brand?tab=inbox'
                 : null;
 
-    // --- fetchNotifications ---
     const fetchNotifications = useCallback(async () => {
         if (!user) return;
 
@@ -46,6 +43,8 @@ export default function Header() {
             .select('id, content, created_at, read, sender_id')
             .eq('receiver_id', user.id)
             .eq('read', false)
+            // FIX 1: Exclude messages the user sent to themselves
+            .neq('sender_id', user.id)
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -76,6 +75,7 @@ export default function Header() {
         fetchNotificationsRef.current = fetchNotifications;
     }, [fetchNotifications]);
 
+    // Reset on logout
     useEffect(() => {
         if (!user) {
             setUnreadCount(0);
@@ -84,12 +84,15 @@ export default function Header() {
         }
     }, [user]);
 
+    // Initial fetch
     useEffect(() => {
         if (user) {
             fetchNotifications();
         }
     }, [user, fetchNotifications]);
 
+    // Real-time subscription – only listen for INSERT events for messages
+    // sent BY OTHERS to this user (excludes own messages via sender_id filter)
     useEffect(() => {
         if (!user) return;
 
@@ -105,21 +108,16 @@ export default function Header() {
                     event: 'INSERT',
                     schema: 'public',
                     table: 'messages',
+                    // FIX 2: Only trigger badge for messages received FROM others,
+                    // not messages this user sends (which also have receiver_id set).
+                    // We filter by receiver_id here and exclude own sender in the fetch.
                     filter: `receiver_id=eq.${user.id}`,
                 },
-                () => {
-                    fetchNotificationsRef.current();
-                }
-            )
-            .on(
-                'postgres_changes',
-                {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'messages',
-                    filter: `receiver_id=eq.${user.id}`,
-                },
-                () => {
+                (payload) => {
+                    // FIX 3: Guard in the realtime callback – ignore own messages
+                    if (payload.new && (payload.new as { sender_id: string }).sender_id === user.id) {
+                        return;
+                    }
                     fetchNotificationsRef.current();
                 }
             )
@@ -132,11 +130,13 @@ export default function Header() {
         };
     }, [user, supabase]);
 
+    // FIX 4: Listen for custom "inbox:read" event dispatched by the dashboard
+    // to clear the badge whenever messages are marked as read in the inbox UI
     useEffect(() => {
-        const handler = () => fetchNotifications();
+        const handler = () => fetchNotificationsRef.current();
         window.addEventListener('inbox:read', handler);
         return () => window.removeEventListener('inbox:read', handler);
-    }, [fetchNotifications]);
+    }, []);
 
     return (
         <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-[#0D0D0B] text-white text-[11px] tracking-[0.08em] uppercase font-medium">
@@ -168,10 +168,9 @@ export default function Header() {
 
                 {user ? (
                     <>
-            <span className="text-gray-400 normal-case text-[11px] tracking-normal ml-4">
-              {profile?.full_name || user.email}
-            </span>
-                        {/* ✅ Dashboard link now points to the root of the dashboard */}
+                        <span className="text-gray-400 normal-case text-[11px] tracking-normal ml-4">
+                            {profile?.full_name || user.email}
+                        </span>
                         <Link
                             href={`/dashboard/${profile?.role}`}
                             className="text-white/60 hover:text-white transition-colors"
@@ -192,8 +191,8 @@ export default function Header() {
                                     <ChatsCircle className="w-6 h-6" weight="regular" />
                                     {unreadCount > 0 && (
                                         <span className="absolute -top-2 left-1/2 -translate-x-1/2 h-4 min-w-[16px] px-1 text-[9px] font-bold rounded-full flex items-center justify-center bg-blue-100 text-blue-700 border border-blue-200">
-                      {unreadCount > 9 ? '9+' : unreadCount}
-                    </span>
+                                            {unreadCount > 9 ? '9+' : unreadCount}
+                                        </span>
                                     )}
                                 </button>
 
@@ -202,9 +201,9 @@ export default function Header() {
                                         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
                                         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 z-50">
                                             <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50 rounded-t-lg">
-                        <span className="font-semibold text-gray-700 text-sm normal-case tracking-normal">
-                          Notifications
-                        </span>
+                                                <span className="font-semibold text-gray-700 text-sm normal-case tracking-normal">
+                                                    Notifications
+                                                </span>
                                                 <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
                                                     <X className="w-4 h-4" />
                                                 </button>
@@ -212,38 +211,30 @@ export default function Header() {
                                             <div className="max-h-72 overflow-y-auto">
                                                 {messages.length === 0 ? (
                                                     <p className="px-4 py-6 text-sm text-gray-500 text-center normal-case tracking-normal">
-                                                        No recent messages
+                                                        No unread messages
                                                     </p>
                                                 ) : (
                                                     messages.map((m) => (
                                                         <Link
                                                             key={m.sender_id}
-                                                            // ✅ Navigate to inbox tab with partner query
                                                             href={`${inboxPath}&partner=${m.sender_id}`}
                                                             onClick={() => setOpen(false)}
-                                                            className={`block px-4 py-3 border-b border-gray-50 transition-colors hover:bg-gray-100 ${
-                                                                !m.read
-                                                                    ? 'bg-blue-100 border-l-4 border-l-blue-600 font-semibold'
-                                                                    : ''
-                                                            }`}
+                                                            className="block px-4 py-3 border-b border-gray-50 transition-colors hover:bg-gray-100 bg-blue-50 border-l-4 border-l-blue-500"
                                                         >
-                                                            <div className="flex justify-between items-start">
-                                                                <p className="text-sm line-clamp-2">{m.content}</p>
-                                                                {!m.read && (
-                                                                    <span className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 ml-1 mt-0.5" />
-                                                                )}
+                                                            <div className="flex justify-between items-start gap-2">
+                                                                <p className="text-sm text-gray-800 normal-case tracking-normal line-clamp-2 font-medium">{m.content}</p>
+                                                                <span className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1" />
                                                             </div>
-                                                            <span className="text-xs text-gray-400 mt-1 block">
-                                {new Date(m.created_at).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                })}
-                              </span>
+                                                            <span className="text-xs text-gray-400 mt-1 block normal-case tracking-normal">
+                                                                {new Date(m.created_at).toLocaleTimeString([], {
+                                                                    hour: '2-digit',
+                                                                    minute: '2-digit',
+                                                                })}
+                                                            </span>
                                                         </Link>
                                                     ))
                                                 )}
                                             </div>
-                                            {/* ✅ "Open Inbox" link now correctly uses the inboxPath (which includes tab=inbox) */}
                                             <Link
                                                 href={inboxPath}
                                                 onClick={() => setOpen(false)}

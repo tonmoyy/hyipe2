@@ -49,6 +49,18 @@ interface Campaign {
     brand: { full_name: string };
 }
 
+interface AdminThread {
+    id: string;
+    brand_id: string;
+    brand_name: string;
+    influencer_id: string;
+    influencer_name: string;
+    campaign_id: string;
+    campaign_title: string;
+    last_message: string;
+    last_at: string;
+}
+
 interface Message {
     id: string;
     sender_id: string;
@@ -56,9 +68,11 @@ interface Message {
     content: string;
     created_at: string;
     read: boolean;
+    thread_id?: string;
+    sender_name?: string;
 }
 
-/* ─── Props for sub‑views ─── */
+/* ─── Props ─── */
 interface UserManagementProps {
     allProfiles: Profile[];
     loading: boolean;
@@ -83,10 +97,13 @@ interface CampaignMonitorProps {
 }
 
 interface AdminInboxProps {
-    messages: Message[];
+    threads: AdminThread[];
     loading: boolean;
-    selectedMessage: Message | null;
-    setSelectedMessage: (msg: Message | null) => void;
+    selectedThread: AdminThread | null;
+    setSelectedThread: (thread: AdminThread | null) => void;
+    conversation: Message[];
+    conversationLoading: boolean;
+    loadConversation: (thread: AdminThread) => Promise<void>;
 }
 
 interface MakeAdminProps {
@@ -114,11 +131,16 @@ function AdminDashboardInner() {
     const [activeSub, setActiveSub] = useState<SubView>(initialTab);
     const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
     const [pendingCampaigns, setPendingCampaigns] = useState<Campaign[]>([]);
-    const [allMessages, setAllMessages] = useState<Message[]>([]);
-    const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+
+    const [threads, setThreads] = useState<AdminThread[]>([]);
+    const [loadingThreads, setLoadingThreads] = useState(false);
+    const [selectedThread, setSelectedThread] = useState<AdminThread | null>(null);
+    const [conversation, setConversation] = useState<Message[]>([]);
+    const [conversationLoading, setConversationLoading] = useState(false);
+
     const [loadingUsers, setLoadingUsers] = useState(false);
     const [loadingCampaigns, setLoadingCampaigns] = useState(false);
-    const [loadingMessages, setLoadingMessages] = useState(false);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [roleFilter, setRoleFilter] = useState('all');
     const [page, setPage] = useState(1);
@@ -133,7 +155,6 @@ function AdminDashboardInner() {
         text: string;
     } | null>(null);
 
-    // Auth redirect
     useEffect(() => {
         if (authLoading) return;
         if (!user) {
@@ -196,23 +217,95 @@ function AdminDashboardInner() {
         setLoadingCampaigns(false);
     }, [supabase]);
 
-    const fetchMessages = useCallback(async () => {
-        setLoadingMessages(true);
-        const { data } = await supabase
-            .from('messages')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(50);
-        setAllMessages((data as Message[]) ?? []);
-        setLoadingMessages(false);
+    const fetchThreads = useCallback(async () => {
+        setLoadingThreads(true);
+
+        const { data: threadData, error: threadError } = await supabase
+            .from('conversation_threads')
+            .select(`
+                id,
+                campaign_id,
+                brand_id,
+                influencer_id,
+                last_message,
+                last_message_at,
+                campaign:campaigns ( title )
+            `)
+            .order('last_message_at', { ascending: false });
+
+        if (threadError) {
+            console.error(threadError);
+            setThreads([]);
+            setLoadingThreads(false);
+            return;
+        }
+
+        const brandIds = [...new Set((threadData ?? []).map((t: any) => t.brand_id))];
+        const influencerIds = [...new Set((threadData ?? []).map((t: any) => t.influencer_id))];
+
+        const [brandRes, influencerRes] = await Promise.all([
+            brandIds.length > 0
+                ? supabase.from('profiles').select('id, full_name').in('id', brandIds)
+                : { data: [] },
+            influencerIds.length > 0
+                ? supabase.from('profiles').select('id, full_name').in('id', influencerIds)
+                : { data: [] },
+        ]);
+
+        const brandMap = new Map((brandRes.data ?? []).map((p: any) => [p.id, p.full_name]));
+        const influencerMap = new Map((influencerRes.data ?? []).map((p: any) => [p.id, p.full_name]));
+
+        const threads: AdminThread[] = (threadData ?? []).map((t: any) => ({
+            id: t.id,
+            brand_id: t.brand_id,
+            brand_name: brandMap.get(t.brand_id) ?? 'Unknown Brand',
+            influencer_id: t.influencer_id,
+            influencer_name: influencerMap.get(t.influencer_id) ?? 'Unknown Influencer',
+            campaign_id: t.campaign_id,
+            campaign_title: t.campaign?.title ?? 'Untitled',
+            last_message: t.last_message ?? '',
+            last_at: t.last_message_at ?? t.created_at,
+        }));
+
+        setThreads(threads);
+        setLoadingThreads(false);
     }, [supabase]);
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const loadConversation = useCallback(async (thread: AdminThread) => {
+        setConversationLoading(true);
+        setSelectedThread(thread);
+
+        const { data, error } = await supabase
+            .from('messages')
+            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id')
+            .eq('campaign_id', thread.campaign_id)
+            .order('created_at', { ascending: true });
+
+        if (!error && data) {
+            const senderIds = [...new Set((data as Message[]).map(m => m.sender_id))];
+            const { data: senderProfiles } = await supabase
+                .from('profiles')
+                .select('id, full_name')
+                .in('id', senderIds);
+            const nameMap = new Map((senderProfiles ?? []).map((p: any) => [p.id, p.full_name]));
+
+            const msgs: Message[] = (data as Message[]).map(m => ({
+                ...m,
+                sender_name: nameMap.get(m.sender_id) ?? 'Unknown',
+            }));
+            setConversation(msgs);
+        } else {
+            console.error(error);
+            setConversation([]);
+        }
+        setConversationLoading(false);
+    }, [supabase]);
+
     useEffect(() => {
         if (initialTab === 'users') fetchUsers();
         if (initialTab === 'monitor') fetchCampaigns();
-        if (initialTab === 'inbox') fetchMessages();
-    }, [initialTab, fetchUsers, fetchCampaigns, fetchMessages]);
+        if (initialTab === 'inbox') fetchThreads();
+    }, [initialTab, fetchUsers, fetchCampaigns, fetchThreads]);
 
     const switchTab = useCallback(
         async (tab: SubView) => {
@@ -222,10 +315,10 @@ function AdminDashboardInner() {
             router.replace(`/dashboard/admin?${params.toString()}`, { scroll: false });
             if (tab === 'users') await fetchUsers();
             if (tab === 'monitor') await fetchCampaigns();
-            if (tab === 'inbox') await fetchMessages();
+            if (tab === 'inbox') await fetchThreads();
             setMakeAdminMessage(null);
         },
-        [searchParams, router, fetchUsers, fetchCampaigns, fetchMessages]
+        [searchParams, router, fetchUsers, fetchCampaigns, fetchThreads]
     );
 
     const handleApprove = async (id: string) => {
@@ -308,7 +401,6 @@ function AdminDashboardInner() {
         );
     }
 
-    // Build sidebar navigation with proper types
     const navItems: { key: SubView; icon: string; label: string }[] = [
         { key: 'users', icon: '◎', label: 'User Management' },
         { key: 'monitor', icon: '◈', label: 'Campaign Monitor' },
@@ -324,8 +416,8 @@ function AdminDashboardInner() {
                 <div className="sidebar-brand px-6 mb-8">
                     <Link href="/" className="logo font-['Playfair_Display'] text-lg font-bold">HYIPE</Link>
                     <span className="text-[9px] uppercase text-white bg-[#A32D2D] px-1.5 py-0.5 rounded-full inline-block mt-1">
-            {profile?.role === 'superadmin' ? 'Super Admin' : 'Admin'}
-          </span>
+                        {profile?.role === 'superadmin' ? 'Super Admin' : 'Admin'}
+                    </span>
                 </div>
 
                 <nav className="sidebar-nav flex-1 px-3">
@@ -375,8 +467,13 @@ function AdminDashboardInner() {
                 )}
                 {activeSub === 'inbox' && (
                     <AdminInboxSection
-                        messages={allMessages} loading={loadingMessages}
-                        selectedMessage={selectedMessage} setSelectedMessage={setSelectedMessage}
+                        threads={threads}
+                        loading={loadingThreads}
+                        selectedThread={selectedThread}
+                        setSelectedThread={setSelectedThread}
+                        conversation={conversation}
+                        conversationLoading={conversationLoading}
+                        loadConversation={loadConversation}
                     />
                 )}
                 {activeSub === 'make-admin' && (
@@ -409,7 +506,7 @@ function AdminDashboardInner() {
     );
 }
 
-/* ─── User Management Section ─── */
+/* ─── User Management Section (unchanged) ─── */
 function UserManagementSection({
                                    allProfiles, loading, searchQuery, setSearchQuery, roleFilter, setRoleFilter,
                                    page, setPage, pageSize, onRemoveUser, onVerifyUser, onViewUser, currentAdminRole,
@@ -496,7 +593,7 @@ function UserManagementSection({
     );
 }
 
-/* ─── Make Admin Section ─── */
+/* ─── Make Admin Section (unchanged) ─── */
 function MakeAdminSection({ email, setEmail, onPromote, loading, message }: MakeAdminProps) {
     return (
         <>
@@ -543,7 +640,7 @@ function MakeAdminSection({ email, setEmail, onPromote, loading, message }: Make
     );
 }
 
-/* ─── Campaign Monitor Section ─── */
+/* ─── Campaign Monitor Section (unchanged) ─── */
 function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: CampaignMonitorProps) {
     const awaitingReview = campaigns.filter((c) => c.status === 'under_review');
     const liveCampaigns = campaigns.filter((c) => c.status === 'live');
@@ -554,8 +651,8 @@ function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: Cam
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">Campaign Monitor</h2>
                 {awaitingReview.length > 0 && (
                     <span className="wf-note bg-[#FFFBEA] border border-[#F0D88A] rounded px-2 py-1 text-[10px] text-[#7A6200] font-mono uppercase">
-            {awaitingReview.length} awaiting approval
-          </span>
+                        {awaitingReview.length} awaiting approval
+                    </span>
                 )}
             </div>
 
@@ -631,47 +728,119 @@ function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: Cam
     );
 }
 
-/* ─── Admin Inbox Section ─── */
-function AdminInboxSection({ messages, loading, selectedMessage, setSelectedMessage }: AdminInboxProps) {
+/* ─── Updated Admin Inbox Section (with UUIDs appended) ─── */
+function AdminInboxSection({
+                               threads,
+                               loading,
+                               selectedThread,
+                               setSelectedThread,
+                               conversation,
+                               conversationLoading,
+                               loadConversation,
+                           }: AdminInboxProps) {
     return (
         <>
             <div className="admin-top flex flex-col gap-2 mb-5">
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">Inbox Viewer</h2>
                 <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded px-4 py-2 text-xs text-[#7A5200]">
-                    🔒 Admin read-only view. You cannot send messages from here.
+                    🔒 Admin read-only view. All conversations between brands and creators.
                 </div>
             </div>
 
-            <div className="inbox-layout grid grid-cols-[280px_1fr] h-[calc(100vh-170px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+            <div className="inbox-layout grid grid-cols-[300px_1fr] h-[calc(100vh-170px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+                {/* Thread List */}
                 <div className="inbox-list border-r border-[#E5E5DF] overflow-y-auto">
-                    <div className="inbox-list-header px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium">All Conversations</div>
+                    <div className="inbox-list-header px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium">
+                        All Threads ({threads.length})
+                    </div>
                     {loading ? (
-                        <p className="px-4 py-4 text-xs text-[#888880]">Loading...</p>
-                    ) : messages.length === 0 ? (
-                        <p className="px-4 py-4 text-xs text-[#888880]">No messages yet.</p>
+                        <div className="px-4 py-4 text-xs text-[#888880]">Loading...</div>
+                    ) : threads.length === 0 ? (
+                        <div className="px-4 py-4 text-xs text-[#888880]">No conversations yet.</div>
                     ) : (
-                        messages.map((msg) => (
-                            <div key={msg.id} onClick={() => setSelectedMessage(msg)} className={`px-4 py-3 border-b border-[#E5E5DF] cursor-pointer hover:bg-[#F6F6F2] ${selectedMessage?.id === msg.id ? 'bg-[#F6F6F2]' : ''}`}>
-                                <div className="flex justify-between text-sm font-medium">
-                                    <span>{msg.sender_id.slice(0, 8)} → {msg.receiver_id.slice(0, 8)}</span>
-                                    <span className="text-[10px] text-[#888880] font-normal">{new Date(msg.created_at).toLocaleDateString()}</span>
+                        threads.map((thread) => (
+                            <div
+                                key={thread.id}
+                                onClick={() => loadConversation(thread)}
+                                className={`px-4 py-3 border-b border-[#E5E5DF] cursor-pointer hover:bg-[#F6F6F2] ${
+                                    selectedThread?.id === thread.id ? 'bg-[#F0F0EA]' : ''
+                                }`}
+                            >
+                                <div className="flex justify-between items-start">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-medium truncate">
+                                            {thread.brand_name} <span className="text-[#888880]">({thread.brand_id.slice(0,8)})</span>
+                                            {' ↔ '}
+                                            {thread.influencer_name} <span className="text-[#888880]">({thread.influencer_id.slice(0,8)})</span>
+                                        </div>
+                                        <div className="text-[10px] text-[#5E7A0A] font-medium truncate mt-0.5 uppercase">
+                                            {thread.campaign_title}
+                                        </div>
+                                        <div className="text-xs text-[#888880] truncate mt-0.5">
+                                            {thread.last_message}
+                                        </div>
+                                    </div>
+                                    <span className="text-[10px] text-[#888880] ml-2 flex-shrink-0">
+                                        {new Date(thread.last_at).toLocaleDateString()}
+                                    </span>
                                 </div>
-                                <div className="text-xs text-[#888880] truncate mt-1">{msg.content}</div>
                             </div>
                         ))
                     )}
                 </div>
 
-                <div className="chat-pane flex flex-col items-center justify-center text-sm text-[#888880]">
-                    {selectedMessage ? (
-                        <div className="p-5 overflow-y-auto w-full h-full">
-                            <p><strong>From:</strong> {selectedMessage.sender_id}</p>
-                            <p><strong>To:</strong> {selectedMessage.receiver_id}</p>
-                            <p className="mt-2">{selectedMessage.content}</p>
-                            <p className="text-xs text-[#888880] mt-2">{new Date(selectedMessage.created_at).toLocaleString()}</p>
-                        </div>
+                {/* Chat Pane */}
+                <div className="chat-pane flex flex-col min-h-0">
+                    {selectedThread ? (
+                        <>
+                            <div className="px-5 py-4 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
+                                <div>
+                                    <div className="text-sm font-semibold">
+                                        {selectedThread.brand_name} <span className="text-[#888880]">({selectedThread.brand_id.slice(0,8)})</span>
+                                        {' ↔ '}
+                                        {selectedThread.influencer_name} <span className="text-[#888880]">({selectedThread.influencer_id.slice(0,8)})</span>
+                                    </div>
+                                    <div className="text-[10px] text-[#5E7A0A] uppercase">
+                                        {selectedThread.campaign_title}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3">
+                                {conversationLoading ? (
+                                    <div className="text-sm text-[#888880]">Loading...</div>
+                                ) : conversation.length === 0 ? (
+                                    <div className="text-sm text-[#888880]">No messages in this thread.</div>
+                                ) : (
+                                    conversation.map((msg) => (
+                                        <div
+                                            key={msg.id}
+                                            className={`max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed ${
+                                                msg.sender_id === selectedThread.brand_id
+                                                    ? 'bg-[#F0F0EA] self-start'
+                                                    : msg.sender_id === selectedThread.influencer_id
+                                                        ? 'bg-[#0D0D0B] text-white self-end'
+                                                        : 'bg-[#EEEEEE] self-start'
+                                            }`}
+                                        >
+                                            <div className="text-[10px] font-medium mb-1 text-[#888880]">
+                                                {msg.sender_name || 'Unknown'} ({msg.sender_id.slice(0,8)})
+                                            </div>
+                                            {msg.content}
+                                            <div className="text-[10px] mt-1 opacity-50">
+                                                {new Date(msg.created_at).toLocaleTimeString([], {
+                                                    hour: '2-digit',
+                                                    minute: '2-digit',
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </>
                     ) : (
-                        <p>Select a conversation to read</p>
+                        <div className="flex-1 flex items-center justify-center text-sm text-[#888880]">
+                            Select a thread to view conversation
+                        </div>
                     )}
                 </div>
             </div>

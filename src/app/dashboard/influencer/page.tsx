@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 'use client';
-
+import { useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
@@ -23,7 +23,7 @@ type Message = {
 };
 
 type Thread = {
-    id?: string;           // <-- add this
+    id?: string;
     partner_id: string;
     partner_name: string;
     campaign_id: string;
@@ -75,8 +75,8 @@ interface RawContractRow {
     created_at: string;
     title: string;
     budget: number;
-    brand: { full_name: string };      // single object
-    campaign: { title: string };       // single object
+    brand: { full_name: string };
+    campaign: { title: string };
     milestones: Milestone[];
 }
 
@@ -92,6 +92,7 @@ function InfluencerDashboardInner() {
     const { user, profile, signOut } = useAuth();
     const supabase = createClient();
     const searchParams = useSearchParams();
+    const router=useRouter();
 
     const tabParam = searchParams?.get('tab') as SubView | null;
     const initialTab: SubView = tabParam && ['profile','projects','inbox','contracts'].includes(tabParam) ? tabParam : 'profile';
@@ -139,11 +140,11 @@ function InfluencerDashboardInner() {
         const { data } = await supabase
             .from('conversation_threads')
             .select(`
-            *,
-            campaign:campaigns(title),
-            brand:profiles!conversation_threads_brand_id_fkey(full_name)
-        `)
-            .eq('influencer_id', user.id)          // was currentUser.id – fixed
+        *,
+        campaign:campaigns(title),
+        brand:profiles!conversation_threads_brand_id_fkey(full_name)
+      `)
+            .eq('influencer_id', user.id)
             .eq('started_by_brand', true)
             .order('last_message_at', { ascending: false });
 
@@ -169,19 +170,19 @@ function InfluencerDashboardInner() {
         const { data } = await supabase
             .from('contracts')
             .select(`
-            id,
-            campaign_id,
-            brand_id,
-            influencer_id,
-            application_id,
-            status,
-            created_at,
-            title,
-            budget,
-            brand:brand_id ( full_name ),
-            campaign:campaign_id ( title ),
-            milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
-        `)
+        id,
+        campaign_id,
+        brand_id,
+        influencer_id,
+        application_id,
+        status,
+        created_at,
+        title,
+        budget,
+        brand:brand_id ( full_name ),
+        campaign:campaign_id ( title ),
+        milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
+      `)
             .eq('influencer_id', user.id)
             .order('created_at', { ascending: false });
 
@@ -200,12 +201,12 @@ function InfluencerDashboardInner() {
         })));
         setLoadingContracts(false);
     }, [user, supabase]);
+
     // Initial load
     useEffect(() => {
         if (initialTab === 'projects') fetchProjects();
         if (initialTab === 'inbox') fetchMessages();
         if (initialTab === 'contracts') fetchContracts();
-        // eslint-disable-next-line react-hooks/set-state-in-effect
     }, []);
 
     /* ─── Tab Switching ─── */
@@ -215,6 +216,13 @@ function InfluencerDashboardInner() {
         if (tab === 'inbox') await fetchMessages();
         if (tab === 'contracts') await fetchContracts();
     }, [fetchProjects, fetchMessages, fetchContracts]);
+
+    // React to URL query param changes (e.g. from header notification)
+    useEffect(() => {
+        if (tabParam && tabParam !== activeSub) {
+            switchTab(tabParam);
+        }
+    }, [tabParam]);
 
     const handleSaveProfile = async () => {
         setSavingProfile(true);
@@ -257,7 +265,10 @@ function InfluencerDashboardInner() {
                         { key: 'contracts', icon: '📄', label: 'Contracts', badge: activeContractsCount },
                         { key: 'inbox',     icon: '◻',  label: 'Inbox',     badge: inboxUnreadCount },
                     ] as { key: SubView; icon: string; label: string; badge?: number }[]).map(({ key, icon, label, badge }) => (
-                        <button key={key} onClick={() => switchTab(key)}
+                        <button key={key} onClick={() => {
+                            router.push(`/dashboard/influencer?tab=${key}`, { scroll: false });
+
+                        }}
                                 className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
                                     activeSub === key ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
                                 }`}>
@@ -299,6 +310,7 @@ function InfluencerDashboardInner() {
                 {activeSub === 'inbox' && (
                     <div className="flex-1 overflow-hidden flex flex-col p-10 pb-0">
                         <InboxSection
+                            key={`${partnerParam}-${campaignParam}`}
                             threads={threads} loading={loadingMessages}
                             currentUserId={user!.id}
                             onThreadRead={handleThreadRead}
@@ -516,11 +528,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState<string | null>(null);
 
-    const submitMilestone = async (
-        milestoneId: string,
-        text: string,
-        url: string
-    ) => {
+    const submitMilestone = async (milestoneId: string, text: string, url: string) => {
         const { error } = await supabase
             .from('milestones')
             .update({
@@ -529,10 +537,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                 submission_url: url,
             })
             .eq('id', milestoneId);
-
-        if (!error) {
-            onRefresh();
-        }
+        if (!error) onRefresh();
     };
 
     const milestoneStatusBadge = (status: Milestone['status']) => {
@@ -627,15 +632,8 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                                                                             onClick={async () => {
                                                                                 const submissionText = prompt('Enter submission details') || '';
                                                                                 const submissionUrl = prompt('Enter submission URL (optional)') || '';
-
                                                                                 setSubmitting(m.id);
-
-                                                                                await submitMilestone(
-                                                                                    m.id,
-                                                                                    submissionText,
-                                                                                    submissionUrl
-                                                                                );
-
+                                                                                await submitMilestone(m.id, submissionText, submissionUrl);
                                                                                 setSubmitting(null);
                                                                             }}
                                                                             disabled={submitting === m.id}
@@ -679,13 +677,23 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
     );
 }
 
-/* ─── Inbox Section ─── */
-/* ─── Inbox Section ─── */
-function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefreshThreads, initialPartnerId, initialCampaignId }: {
-    threads: Thread[]; loading: boolean; currentUserId: string;
+/* ─── Inbox Section (fixed) ─── */
+function InboxSection({
+                          threads,
+                          loading,
+                          currentUserId,
+                          onThreadRead,
+                          onRefreshThreads,
+                          initialPartnerId,
+                          initialCampaignId,
+                      }: {
+    threads: Thread[];
+    loading: boolean;
+    currentUserId: string;
     onThreadRead: (partnerId: string, campaignId: string) => Promise<void>;
     onRefreshThreads: () => Promise<void>;
-    initialPartnerId: string | null; initialCampaignId: string | null;
+    initialPartnerId: string | null;
+    initialCampaignId: string | null;
 }) {
     const supabase = createClient();
     const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
@@ -693,7 +701,6 @@ function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefresh
     const [conversationLoading, setConversationLoading] = useState(false);
     const [replyText, setReplyText] = useState('');
     const convoEndRef = useRef<HTMLDivElement>(null);
-    const initialLoadDone = useRef(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     const scrollToBottom = useCallback(() => {
@@ -718,46 +725,43 @@ function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefresh
         if (error) { setConversationLoading(false); return; }
 
         const rows = (data ?? []) as unknown as (Message & { sender: { full_name: string } | { full_name: string }[] | null })[];
-        setConversation(rows.map(row => ({
-            id: row.id, sender_id: row.sender_id, receiver_id: row.receiver_id,
-            content: row.content, created_at: row.created_at, read: row.read,
+        const msgs: Message[] = rows.map(row => ({
+            id: row.id,
+            sender_id: row.sender_id,
+            receiver_id: row.receiver_id,
+            content: row.content,
+            created_at: row.created_at,
+            read: row.read,
             campaign_id: row.campaign_id,
-            sender_full_name: (Array.isArray(row.sender) ? row.sender[0]?.full_name : (row.sender as { full_name: string } | null)?.full_name)
-                || (row.sender_id === thread.partner_id ? thread.partner_name : 'You'),
-        })));
+            sender_full_name:
+                (Array.isArray(row.sender) ? row.sender[0]?.full_name : row.sender?.full_name) ||
+                (row.sender_id === thread.partner_id ? thread.partner_name : 'You'),
+        }));
+        setConversation(msgs);
         setConversationLoading(false);
         await onThreadRead(thread.partner_id, thread.campaign_id);
         setTimeout(scrollToBottom, 50);
         setTimeout(() => inputRef.current?.focus(), 100);
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
-    // Auto‑open thread from URL params
-    // Auto‑open thread when threads become available after mount
+    // Auto‑open thread from URL params (no initialLoadDone ref)
     useEffect(() => {
-        if (
-            !initialLoadDone.current &&
-            initialPartnerId &&
-            threads.length > 0
-        ) {
-            const thread = threads.find(t =>
-                t.partner_id === initialPartnerId &&
-                (!initialCampaignId || t.campaign_id === initialCampaignId)
-            ) ?? threads.find(t => t.partner_id === initialPartnerId);
-            if (thread) {
-                loadConversation(thread);
-                initialLoadDone.current = true;
-            }
-        }
-    }, [threads, initialPartnerId, initialCampaignId, loadConversation]);
+        if (!initialPartnerId || threads.length === 0) return;
 
-    // ✅ Fix: await markAllRead BEFORE refreshing threads
+        const thread = threads.find(t =>
+            t.partner_id === initialPartnerId &&
+            (!initialCampaignId || t.campaign_id === initialCampaignId)
+        ) ?? threads.find(t => t.partner_id === initialPartnerId);
+
+        if (thread && (!selectedThread || selectedThread.partner_id !== thread.partner_id || selectedThread.campaign_id !== thread.campaign_id)) {
+            loadConversation(thread);
+        }
+    }, [initialPartnerId, initialCampaignId, threads, loadConversation, selectedThread]);
+
+    // Mark all messages as read on mount
     useEffect(() => {
         const markAllReadAndRefresh = async () => {
-            await supabase
-                .from('messages')
-                .update({ read: true })
-                .eq('receiver_id', currentUserId)
-                .eq('read', false);
+            await supabase.from('messages').update({ read: true }).eq('receiver_id', currentUserId).eq('read', false);
             window.dispatchEvent(new Event('inbox:read'));
             await onRefreshThreads();
         };
@@ -816,15 +820,11 @@ function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefresh
                                                     {thread.partner_name}
                                                 </div>
                                                 {thread.campaign_title && (
-                                                    <div className="text-[10px] text-[#5E7A0A] font-medium truncate mt-0.5 uppercase tracking-[0.04em]">
-                                                        {thread.campaign_title}
-                                                    </div>
+                                                    <div className="text-[10px] text-[#5E7A0A] font-medium truncate mt-0.5 uppercase tracking-[0.04em]">{thread.campaign_title}</div>
                                                 )}
                                                 <div className="text-xs text-[#888880] truncate mt-0.5">{thread.last_message}</div>
                                             </div>
-                                            <span className="text-[10px] text-[#888880] ml-2 flex-shrink-0">
-                                                {new Date(thread.last_at).toLocaleDateString()}
-                                            </span>
+                                            <span className="text-[10px] text-[#888880] ml-2 flex-shrink-0">{new Date(thread.last_at).toLocaleDateString()}</span>
                                         </div>
                                     </div>
                                 );
@@ -879,13 +879,10 @@ function InboxSection({ threads, loading, currentUserId, onThreadRead, onRefresh
                             </div>
                         </>
                     ) : (
-                        <div className="flex-1 flex items-center justify-center text-sm text-[#888880]">
-                            Select a conversation to read
-                        </div>
+                        <div className="flex-1 flex items-center justify-center text-sm text-[#888880]">Select a conversation to read</div>
                     )}
                 </div>
             </div>
-            {/* suppress unused warning */}
             <span style={{ display: 'none' }}>{onRefreshThreads.toString()}</span>
         </div>
     );

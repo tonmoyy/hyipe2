@@ -4,6 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/providers/AuthProvider';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabaseClient';
 import { RealtimeChannel, PostgrestError } from '@supabase/supabase-js';
 import { ChatsCircle } from '@phosphor-icons/react';
@@ -21,6 +22,7 @@ type Message = {
 export default function Header() {
     const { user, profile, signOut } = useAuth();
     const supabase = createClient();
+    const pathname = usePathname(); // ← for route‑based badge refresh
 
     const [open, setOpen] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -133,7 +135,6 @@ export default function Header() {
     }, [user, supabase]);
 
     // Listen for inbox:read – clear badge and re‑fetch actual count
-    // Listen for inbox:read – clear badge immediately and then re‑fetch
     useEffect(() => {
         const handler = () => {
             setUnreadCount(0);   // optimistic clear
@@ -142,6 +143,19 @@ export default function Header() {
         window.addEventListener('inbox:read', handler);
         return () => window.removeEventListener('inbox:read', handler);
     }, [fetchUnreadCount]);
+
+    // Route‑based badge refresh – when user navigates to inbox page
+    useEffect(() => {
+        if (pathname.startsWith('/dashboard/') && pathname.includes('tab=inbox')) {
+            fetchUnreadCount();
+        }
+    }, [pathname, fetchUnreadCount]);
+
+    // Optimistic badge decrease when clicking a notification
+    const handleNotificationClick = useCallback(() => {
+        setOpen(false);
+        setUnreadCount(prev => Math.max(0, prev - 1));
+    }, []);
 
     return (
         <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-6 bg-[#0D0D0B] text-white text-[11px] tracking-[0.08em] uppercase font-medium">
@@ -222,8 +236,8 @@ export default function Header() {
                                                     messages.map((m) => (
                                                         <Link
                                                             key={m.id}
-                                                            href={`${inboxPath}&partner=${m.sender_id}&campaign=${m.campaign_id ?? ''}`}
-                                                            onClick={() => setOpen(false)}
+                                                            href={`${inboxPath}&partner=${encodeURIComponent(m.sender_id)}&campaign=${encodeURIComponent(m.campaign_id ?? '')}`}
+                                                            onClick={handleNotificationClick}
                                                             className="block px-4 py-3 border-b border-gray-50 transition-colors hover:bg-gray-100 bg-blue-50 border-l-4 border-l-blue-500"
                                                         >
                                                             <div className="flex justify-between items-start gap-2">

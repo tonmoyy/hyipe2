@@ -9,7 +9,7 @@ import DashboardRoleGuard from '@/components/DashboardRoleGuard';
 import { createClient } from '@/lib/supabaseClient';
 
 /* ─── Types ─── */
-type SubView = 'users' | 'monitor' | 'inbox' | 'make-admin';
+type SubView = 'users' | 'monitor' | 'inbox' | 'make-admin' | 'new-chat';
 
 interface Profile {
     id: string;
@@ -47,7 +47,6 @@ interface Campaign {
     brand: { full_name: string };
 }
 
-// Raw thread from conversation_threads + campaign join (campaign is an array)
 interface RawThreadRow {
     id: string;
     campaign_id: string;
@@ -68,6 +67,7 @@ interface AdminThread {
     campaign_title: string;
     last_message: string;
     last_at: string;
+    unread?: boolean;
 }
 
 interface Message {
@@ -81,7 +81,6 @@ interface Message {
     sender_name?: string;
 }
 
-// Raw message from Supabase
 interface RawMessage {
     id: string;
     sender_id: string;
@@ -124,6 +123,9 @@ interface AdminInboxProps {
     conversation: Message[];
     conversationLoading: boolean;
     loadConversation: (thread: AdminThread) => Promise<void>;
+    onNewChat: () => void;
+    currentUserId: string;
+    onSendReply: (threadId: string, content: string) => Promise<void>;
 }
 
 interface MakeAdminProps {
@@ -147,6 +149,8 @@ function AdminDashboardInner() {
             ? tabParam
             : 'users';
     })();
+
+    const threadParam = searchParams?.get('thread') || null;
 
     const [activeSub, setActiveSub] = useState<SubView>(initialTab);
     const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
@@ -174,6 +178,12 @@ function AdminDashboardInner() {
         type: 'success' | 'error';
         text: string;
     } | null>(null);
+
+    // New chat state
+    const [showNewChatModal, setShowNewChatModal] = useState(false);
+    const [newChatRecipientId, setNewChatRecipientId] = useState('');
+    const [newChatMessage, setNewChatMessage] = useState('');
+    const [creatingChat, setCreatingChat] = useState(false);
 
     useEffect(() => {
         if (authLoading) return;
@@ -239,7 +249,6 @@ function AdminDashboardInner() {
 
     const fetchThreads = useCallback(async () => {
         setLoadingThreads(true);
-
         const { data: threadData, error: threadError } = await supabase
             .from('conversation_threads')
             .select(`
@@ -260,7 +269,6 @@ function AdminDashboardInner() {
             return;
         }
 
-        // Safe cast after handling the array
         const rawThreads = (threadData ?? []) as unknown as RawThreadRow[];
 
         const brandIds = [...new Set(rawThreads.map((t) => t.brand_id))];
@@ -283,11 +291,11 @@ function AdminDashboardInner() {
         );
 
         const threads: AdminThread[] = rawThreads.map((t) => {
-            // campaign is an array, take the first element's title
+            // for threads without a campaign (direct admin chat), use "Direct Chat"
             const campaignTitle =
                 Array.isArray(t.campaign) && t.campaign.length > 0
                     ? t.campaign[0].title
-                    : 'Untitled';
+                    : 'Direct Chat';
 
             return {
                 id: t.id,
@@ -310,12 +318,19 @@ function AdminDashboardInner() {
         setConversationLoading(true);
         setSelectedThread(thread);
 
-        const { data, error } = await supabase
+        let query = supabase
             .from('messages')
             .select('id, sender_id, receiver_id, content, created_at, read, campaign_id')
-            .eq('campaign_id', thread.campaign_id)
             .order('created_at', { ascending: true });
 
+        // correct handling of NULL campaign_id
+        if (thread.campaign_id) {
+            query = query.eq('campaign_id', thread.campaign_id);
+        } else {
+            query = query.is('campaign_id', null);
+        }
+
+        const { data, error } = await query;
         if (!error && data) {
             const msgs = data as RawMessage[];
             const senderIds = [...new Set(msgs.map((m) => m.sender_id))];
@@ -338,6 +353,16 @@ function AdminDashboardInner() {
         }
         setConversationLoading(false);
     }, [supabase]);
+
+    // Auto‑open a thread from URL parameter
+    useEffect(() => {
+        if (threadParam && threads.length > 0 && !selectedThread) {
+            const thread = threads.find((t) => t.id === threadParam);
+            if (thread) {
+                loadConversation(thread);
+            }
+        }
+    }, [threadParam, threads, selectedThread, loadConversation]);
 
     useEffect(() => {
         if (initialTab === 'users') fetchUsers();
@@ -418,6 +443,78 @@ function AdminDashboardInner() {
         setMakeAdminLoading(false);
     };
 
+    // ── New Chat Handlers ──
+    const handleCreateNewChat = async () => {
+        if (!user || !newChatRecipientId) return;
+        setCreatingChat(true);
+
+        // 1. Create a conversation_thread (admin as influencer, recipient as brand)
+        const { data: thread, error: threadErr } = await supabase
+            .from('conversation_threads')
+            .insert({
+                brand_id: newChatRecipientId,
+                influencer_id: user.id,
+                campaign_id: null,
+                started_by_brand: false,
+                last_message: newChatMessage || 'Chat started',
+                last_message_at: new Date().toISOString(),
+            })
+            .select('id')
+            .single();
+
+        if (threadErr) {
+            alert('Failed to create thread: ' + threadErr.message);
+            setCreatingChat(false);
+            return;
+        }
+
+        // 2. If a message was typed, insert it
+        if (newChatMessage.trim()) {
+            await supabase.from('messages').insert({
+                sender_id: user.id,
+                receiver_id: newChatRecipientId,
+                content: newChatMessage.trim(),
+                campaign_id: null,
+                read: false,
+            });
+        }
+
+        // 3. Refresh threads and navigate to the new thread
+        await fetchThreads();
+        setShowNewChatModal(false);
+        setNewChatRecipientId('');
+        setNewChatMessage('');
+        setCreatingChat(false);
+
+        const params = new URLSearchParams(searchParams?.toString() ?? '');
+        params.set('tab', 'inbox');
+        params.set('thread', thread.id);
+        router.replace(`/dashboard/admin?${params.toString()}`);
+    };
+
+    // ── Send Reply ──
+    const handleSendReply = useCallback(async (threadId: string, content: string) => {
+        if (!user || !content.trim()) return;
+        const thread = threads.find(t => t.id === threadId);
+        if (!thread) return;
+
+        const receiverId =
+            thread.brand_id === user.id ? thread.influencer_id : thread.brand_id;
+
+        await supabase.from('messages').insert({
+            sender_id: user.id,
+            receiver_id: receiverId,
+            content: content.trim(),
+            campaign_id: thread.campaign_id || null,
+            read: false,
+        });
+
+        if (selectedThread?.id === threadId) {
+            loadConversation(selectedThread);
+        }
+        fetchThreads();
+    }, [user, supabase, threads, selectedThread, loadConversation, fetchThreads]);
+
     const pendingCount = pendingCampaigns.filter(
         (c) => c.status === 'under_review'
     ).length;
@@ -447,6 +544,30 @@ function AdminDashboardInner() {
     if (profile?.role === 'superadmin') {
         navItems.push({ key: 'make-admin', icon: '⚡', label: 'Make Admin' });
     }
+    // Real‑time update for admin inbox
+    useEffect(() => {
+        if (!user) return;
+
+        const channel = supabase
+            .channel('admin-inbox-new-msg')
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'messages' },
+                () => {
+                    // Refresh threads to update last_message
+                    fetchThreads();
+                    // If we’re currently viewing a thread, reload its conversation
+                    if (selectedThread) {
+                        loadConversation(selectedThread);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [user, supabase, fetchThreads, selectedThread, loadConversation]);
 
     return (
         <div className="dashboard-shell flex min-h-[calc(100vh-48px)]">
@@ -512,6 +633,9 @@ function AdminDashboardInner() {
                         conversation={conversation}
                         conversationLoading={conversationLoading}
                         loadConversation={loadConversation}
+                        onNewChat={() => setShowNewChatModal(true)}
+                        currentUserId={user.id}
+                        onSendReply={handleSendReply}
                     />
                 )}
                 {activeSub === 'make-admin' && (
@@ -522,6 +646,60 @@ function AdminDashboardInner() {
                     />
                 )}
             </main>
+
+            {/* New Chat Modal */}
+            {showNewChatModal && (
+                <div className="fixed inset-0 bg-black/45 z-[200] flex items-center justify-center">
+                    <div className="bg-white rounded p-9 max-w-[560px] w-[90%] max-h-[85vh] overflow-y-auto">
+                        <h2 className="font-['Playfair_Display'] text-2xl mb-4">New Conversation</h2>
+                        <p className="text-xs text-[#888880] mb-6">Start a chat with any user on the platform.</p>
+
+                        <div className="mb-4">
+                            <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Select User</label>
+                            <select
+                                value={newChatRecipientId}
+                                onChange={(e) => setNewChatRecipientId(e.target.value)}
+                                className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm bg-white"
+                            >
+                                <option value="">— Choose a user —</option>
+                                {allProfiles
+                                    .filter((p) => p.id !== user!.id)
+                                    .map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.full_name} ({p.role}) – {p.email}
+                                        </option>
+                                    ))}
+                            </select>
+                        </div>
+
+                        <div className="mb-4">
+                            <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Message (optional)</label>
+                            <textarea
+                                value={newChatMessage}
+                                onChange={(e) => setNewChatMessage(e.target.value)}
+                                placeholder="Type your first message..."
+                                className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm min-h-[100px]"
+                            />
+                        </div>
+
+                        <div className="flex justify-end gap-2.5">
+                            <button
+                                onClick={() => setShowNewChatModal(false)}
+                                className="border border-[#0D0D0B] text-[#0D0D0B] px-4 py-2 text-xs uppercase tracking-[0.06em]"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleCreateNewChat}
+                                disabled={creatingChat || !newChatRecipientId}
+                                className="bg-[#0D0D0B] text-white px-7 py-2.5 text-xs uppercase tracking-[0.06em] disabled:opacity-50"
+                            >
+                                {creatingChat ? 'Creating...' : 'Start Chat'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {viewProfile && (
                 <div className="fixed inset-0 bg-black/45 z-[200] flex items-center justify-center">
@@ -766,7 +944,7 @@ function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: Cam
     );
 }
 
-/* ─── Updated Admin Inbox Section (with UUIDs appended) ─── */
+/* ─── Updated Admin Inbox Section (with new chat & reply) ─── */
 function AdminInboxSection({
                                threads,
                                loading,
@@ -775,17 +953,43 @@ function AdminInboxSection({
                                conversation,
                                conversationLoading,
                                loadConversation,
+                               onNewChat,
+                               currentUserId,
+                               onSendReply,
                            }: AdminInboxProps) {
+    const [replyText, setReplyText] = useState('');
+    const canSend = selectedThread &&
+        (selectedThread.brand_id === currentUserId || selectedThread.influencer_id === currentUserId);
+
+    const handleReply = () => {
+        if (!selectedThread || !replyText.trim()) return;
+        onSendReply(selectedThread.id, replyText.trim());
+        setReplyText('');
+    };
+
+    // Determine the header title: show campaign name if it exists, otherwise "Direct Chat"
+    const headerTitle = selectedThread
+        ? (selectedThread.campaign_title !== 'Direct Chat'
+            ? selectedThread.campaign_title
+            : null)
+        : null;
+
     return (
         <>
-            <div className="admin-top flex flex-col gap-2 mb-5">
+            <div className="admin-top flex justify-between items-center mb-5">
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">Inbox Viewer</h2>
-                <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded px-4 py-2 text-xs text-[#7A5200]">
-                    🔒 Admin read-only view. All conversations between brands and creators.
-                </div>
+                <button
+                    onClick={onNewChat}
+                    className="btn-primary bg-[#0D0D0B] text-white px-4 py-2 text-xs uppercase tracking-[0.06em]"
+                >
+                    + New Conversation
+                </button>
+            </div>
+            <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded px-4 py-2 text-xs text-[#7A5200] mb-5">
+                🔒 Admin view. All conversations are visible. You can reply to threads where you are a participant.
             </div>
 
-            <div className="inbox-layout grid grid-cols-[300px_1fr] h-[calc(100vh-170px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+            <div className="inbox-layout grid grid-cols-[300px_1fr] h-[calc(100vh-220px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
                 {/* Thread List */}
                 <div className="inbox-list border-r border-[#E5E5DF] overflow-y-auto">
                     <div className="inbox-list-header px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium">
@@ -838,9 +1042,14 @@ function AdminInboxSection({
                                         {' ↔ '}
                                         {selectedThread.influencer_name} <span className="text-[#888880]">({selectedThread.influencer_id.slice(0,8)})</span>
                                     </div>
-                                    <div className="text-[10px] text-[#5E7A0A] uppercase">
-                                        {selectedThread.campaign_title}
-                                    </div>
+                                    {headerTitle && (
+                                        <div className="text-[10px] text-[#5E7A0A] uppercase">
+                                            {headerTitle}
+                                        </div>
+                                    )}
+                                    {!headerTitle && (
+                                        <div className="text-[10px] text-[#5E7A0A] uppercase">Direct Chat</div>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3">
@@ -874,10 +1083,35 @@ function AdminInboxSection({
                                     ))
                                 )}
                             </div>
+
+                            {/* Reply input (only if admin is a participant) */}
+                            {canSend && (
+                                <div className="border-t border-[#E5E5DF] px-4 py-3 flex gap-2.5 flex-shrink-0 bg-white">
+                                    <input
+                                        value={replyText}
+                                        onChange={(e) => setReplyText(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleReply();
+                                            }
+                                        }}
+                                        placeholder="Type a reply..."
+                                        className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none focus:border-[#0D0D0B] transition-colors"
+                                    />
+                                    <button
+                                        onClick={handleReply}
+                                        disabled={!replyText.trim()}
+                                        className="bg-[#0D0D0B] text-white px-5 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50 flex-shrink-0"
+                                    >
+                                        Send
+                                    </button>
+                                </div>
+                            )}
                         </>
                     ) : (
                         <div className="flex-1 flex items-center justify-center text-sm text-[#888880]">
-                            Select a thread to view conversation
+                            Select a thread to view conversation, or start a new one.
                         </div>
                     )}
                 </div>

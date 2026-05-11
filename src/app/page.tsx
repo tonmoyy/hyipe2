@@ -12,7 +12,7 @@ export default function HomePage() {
           <div>
             <p className="hp-hero-tag font-cinzel font-bold tracking-[0.15em] uppercase">Pakistan&rsquo;s First Influencer Marketplace</p>
             <h1 className="font-['Playfair_Display'] text-6xl leading-tight font-bold mb-7">
-              Where Brands<br />Meet <em className="text-[#888880] italic">Real</em><br />Creators.
+              Where Brands <br/> Meet <em className="text-[#888880] italic">Real</em><br />Creators.
             </h1>
             <p className="text-[15px] text-[#3A3A36] leading-relaxed mb-8 max-w-[380px]">
               HYIPE connects Pakistani brands with verified content creators through a transparent, escrow-backed system. No more chasing payments. No more unpaid work.

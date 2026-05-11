@@ -1090,11 +1090,23 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
 
 /* ─── Brand Inbox Section ─── */
 /* ─── Brand Inbox Section ─── */
-function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRefreshThreads, initialPartnerId, initialCampaignId }: {
-    threads: Thread[]; loading: boolean; currentUserId: string;
+/* ─── Brand Inbox Section (fixed) ─── */
+function BrandInboxSection({
+                               threads,
+                               loading,
+                               currentUserId,
+                               onThreadRead,
+                               onRefreshThreads,
+                               initialPartnerId,
+                               initialCampaignId,
+                           }: {
+    threads: Thread[];
+    loading: boolean;
+    currentUserId: string;
     onThreadRead: (partnerId: string, campaignId: string) => Promise<void>;
     onRefreshThreads: () => Promise<void>;
-    initialPartnerId: string | null; initialCampaignId: string | null;
+    initialPartnerId: string | null;
+    initialCampaignId: string | null;
 }) {
     const supabase = createClient();
     const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
@@ -1102,7 +1114,6 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
     const [conversationLoading, setConversationLoading] = useState(false);
     const [replyText, setReplyText] = useState('');
     const convoEndRef = useRef<HTMLDivElement>(null);
-    const initialLoadDone = useRef(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     const scrollToBottom = useCallback(() => {
@@ -1124,15 +1135,27 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
         }
 
         const { data, error } = await query;
-        if (error) { setConversationLoading(false); return; }
+        if (error) {
+            setConversationLoading(false);
+            return;
+        }
 
-        const rows = (data ?? []) as unknown as (Message & { sender: { full_name: string } | { full_name: string }[] | null })[];
+        const rows = (data ?? []) as unknown as (Message & {
+            sender: { full_name: string } | { full_name: string }[] | null;
+        })[];
         const msgs: Message[] = rows.map(row => ({
-            id: row.id, sender_id: row.sender_id, receiver_id: row.receiver_id,
-            content: row.content, created_at: row.created_at, read: row.read,
+            id: row.id,
+            sender_id: row.sender_id,
+            receiver_id: row.receiver_id,
+            content: row.content,
+            created_at: row.created_at,
+            read: row.read,
             campaign_id: row.campaign_id,
-            sender_full_name: (Array.isArray(row.sender) ? row.sender[0]?.full_name : (row.sender as { full_name: string } | null)?.full_name)
-                || (row.sender_id === thread.partner_id ? thread.partner_name : 'You'),
+            sender_full_name:
+                (Array.isArray(row.sender)
+                    ? row.sender[0]?.full_name
+                    : row.sender?.full_name) ||
+                (row.sender_id === thread.partner_id ? thread.partner_name : 'You'),
         }));
         setConversation(msgs);
         setConversationLoading(false);
@@ -1141,26 +1164,29 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
         setTimeout(() => inputRef.current?.focus(), 100);
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
-    // Auto‑open thread from URL params
-    // Auto‑open thread when threads become available after mount
+    // Auto‑open the thread that matches the URL parameters
     useEffect(() => {
-        if (
-            !initialLoadDone.current &&
-            initialPartnerId &&
-            threads.length > 0
-        ) {
-            const thread = threads.find(t =>
+        if (!initialPartnerId || threads.length === 0) return;
+
+        const thread = threads.find(
+            t =>
                 t.partner_id === initialPartnerId &&
                 (!initialCampaignId || t.campaign_id === initialCampaignId)
-            ) ?? threads.find(t => t.partner_id === initialPartnerId);
-            if (thread) {
+        ) ?? threads.find(t => t.partner_id === initialPartnerId);
+
+        if (thread) {
+            // Only load if it's not already the selected thread
+            if (
+                !selectedThread ||
+                selectedThread.partner_id !== thread.partner_id ||
+                selectedThread.campaign_id !== thread.campaign_id
+            ) {
                 loadConversation(thread);
-                initialLoadDone.current = true;
             }
         }
-    }, [threads, initialPartnerId, initialCampaignId, loadConversation]);
+    }, [initialPartnerId, initialCampaignId, threads, loadConversation, selectedThread]);
 
-    // ✅ Fix: await markAllRead BEFORE refreshing threads so the DB is updated first
+    // Mark all messages as read when entering the inbox tab (clears badge)
     useEffect(() => {
         const markAllReadAndRefresh = async () => {
             await supabase
@@ -1168,9 +1194,7 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                 .update({ read: true })
                 .eq('receiver_id', currentUserId)
                 .eq('read', false);
-            // Instantly clear the header badge
             window.dispatchEvent(new Event('inbox:read'));
-            // Now fetch threads – they will see all messages as read
             await onRefreshThreads();
         };
         markAllReadAndRefresh();
@@ -1241,14 +1265,23 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                         ) : (
                             threads.map(thread => {
                                 const key = `${thread.partner_id}::${thread.campaign_id}`;
-                                const isSel = selectedThread?.partner_id === thread.partner_id && selectedThread?.campaign_id === thread.campaign_id;
+                                const isSel =
+                                    selectedThread?.partner_id === thread.partner_id &&
+                                    selectedThread?.campaign_id === thread.campaign_id;
                                 return (
-                                    <div key={key} onClick={() => loadConversation(thread)}
-                                         className={`px-4 py-3 border-b border-[#E5E5DF] cursor-pointer transition-colors ${isSel ? 'bg-[#F0F0EA]' : 'hover:bg-[#F6F6F2]'}`}>
+                                    <div
+                                        key={key}
+                                        onClick={() => loadConversation(thread)}
+                                        className={`px-4 py-3 border-b border-[#E5E5DF] cursor-pointer transition-colors ${
+                                            isSel ? 'bg-[#F0F0EA]' : 'hover:bg-[#F6F6F2]'
+                                        }`}
+                                    >
                                         <div className="flex justify-between items-start">
                                             <div className="flex-1 min-w-0">
                                                 <div className={`text-sm truncate ${thread.unread ? 'font-semibold' : 'font-medium'}`}>
-                                                    {thread.unread && <span className="w-1.5 h-1.5 rounded-full bg-[#0D0D0B] inline-block mr-1.5 mb-0.5" />}
+                                                    {thread.unread && (
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-[#0D0D0B] inline-block mr-1.5 mb-0.5" />
+                                                    )}
                                                     {thread.partner_name}
                                                 </div>
                                                 {thread.campaign_title && (
@@ -1256,7 +1289,9 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                                                         {thread.campaign_title}
                                                     </div>
                                                 )}
-                                                <div className="text-xs text-[#888880] truncate mt-0.5">{thread.last_message}</div>
+                                                <div className="text-xs text-[#888880] truncate mt-0.5">
+                                                    {thread.last_message}
+                                                </div>
                                             </div>
                                             <span className="text-[10px] text-[#888880] ml-2 flex-shrink-0">
                                                 {new Date(thread.last_at).toLocaleDateString()}
@@ -1278,9 +1313,11 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                                     {selectedThread.partner_name.slice(0, 2).toUpperCase()}
                                 </div>
                                 <div>
-                                    <div className="text-sm font-semibold">{selectedThread.campaign_title}</div>
+                                    <div className="text-sm font-semibold">{selectedThread.partner_name}</div>
                                     {selectedThread.campaign_title && (
-                                        <div className="text-[10px] text-[#5E7A0A] uppercase tracking-[0.04em] font-medium">{selectedThread.campaign_title}</div>
+                                        <div className="text-[10px] text-[#5E7A0A] uppercase tracking-[0.04em] font-medium">
+                                            {selectedThread.campaign_title}
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -1291,12 +1328,24 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                                     <div className="text-sm text-[#888880]">No messages yet.</div>
                                 ) : (
                                     conversation.map(msg => (
-                                        <div key={msg.id} className={`max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed ${
-                                            msg.sender_id === currentUserId ? 'bg-[#0D0D0B] text-white self-end' : 'bg-[#F0F0EA] self-start'
-                                        }`}>
+                                        <div
+                                            key={msg.id}
+                                            className={`max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed ${
+                                                msg.sender_id === currentUserId
+                                                    ? 'bg-[#0D0D0B] text-white self-end'
+                                                    : 'bg-[#F0F0EA] self-start'
+                                            }`}
+                                        >
                                             {msg.content}
-                                            <div className={`text-[10px] mt-1 ${msg.sender_id === currentUserId ? 'text-white/40' : 'text-[#888880]'}`}>
-                                                {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            <div
+                                                className={`text-[10px] mt-1 ${
+                                                    msg.sender_id === currentUserId ? 'text-white/40' : 'text-[#888880]'
+                                                }`}
+                                            >
+                                                {new Date(msg.created_at).toLocaleTimeString([], {
+                                                    hour: '2-digit',
+                                                    minute: '2-digit',
+                                                })}
                                             </div>
                                         </div>
                                     ))
@@ -1304,12 +1353,24 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                                 <div ref={convoEndRef} />
                             </div>
                             <div className="border-t border-[#E5E5DF] px-4 py-3 flex gap-2.5 flex-shrink-0 bg-white">
-                                <input ref={inputRef} value={replyText} onChange={e => setReplyText(e.target.value)}
-                                       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                                       placeholder="Type a message..."
-                                       className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none focus:border-[#0D0D0B] transition-colors" />
-                                <button onClick={handleSendReply} disabled={!replyText.trim()}
-                                        className="bg-[#0D0D0B] text-white px-5 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50 flex-shrink-0">
+                                <input
+                                    ref={inputRef}
+                                    value={replyText}
+                                    onChange={e => setReplyText(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleSendReply();
+                                        }
+                                    }}
+                                    placeholder="Type a message..."
+                                    className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none focus:border-[#0D0D0B] transition-colors"
+                                />
+                                <button
+                                    onClick={handleSendReply}
+                                    disabled={!replyText.trim()}
+                                    className="bg-[#0D0D0B] text-white px-5 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50 flex-shrink-0"
+                                >
                                     Send
                                 </button>
                             </div>
@@ -1321,7 +1382,6 @@ function BrandInboxSection({ threads, loading, currentUserId, onThreadRead, onRe
                     )}
                 </div>
             </div>
-            {/* suppress unused warning */}
             <span style={{ display: 'none' }}>{onRefreshThreads.toString()}</span>
         </div>
     );

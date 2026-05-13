@@ -52,6 +52,7 @@ type ProfileFormType = {
     bio: string; ig_handle: string; ig_followers: string; tiktok_handle: string;
     tiktok_followers: string; yt_url: string; yt_subscribers: string;
     primary_niche: string; secondary_niche: string; rate_ig_post: string; rate_video: string;
+    avatar_url?: string;   // ← add this
 };
 
 interface RawApplicationRow {
@@ -84,7 +85,7 @@ const defaultForm: ProfileFormType = {
     full_name: '', display_name: '', city: '', phone: '', bio: '',
     ig_handle: '', ig_followers: '', tiktok_handle: '', tiktok_followers: '',
     yt_url: '', yt_subscribers: '', primary_niche: '', secondary_niche: '',
-    rate_ig_post: '', rate_video: '',
+    rate_ig_post: '', rate_video: '',avatar_url: '',
 };
 
 /* ─── Main Component ─── */
@@ -100,7 +101,11 @@ function InfluencerDashboardInner() {
     const campaignParam = searchParams?.get('campaign') || null;
 
     const [activeSub, setActiveSub] = useState<SubView>(initialTab);
-    const [profileForm, setProfileForm] = useState<ProfileFormType>(() => ({ ...defaultForm, full_name: profile?.full_name ?? '' }));
+    const [profileForm, setProfileForm] = useState<ProfileFormType>(() => ({
+        ...defaultForm,
+        full_name: profile?.full_name ?? '',
+        avatar_url: profile?.avatar_url ?? '',
+    }));
     const [applications, setApplications] = useState<Application[]>([]);
     const [threads, setThreads] = useState<Thread[]>([]);
     const [contracts, setContracts] = useState<Contract[]>([]);
@@ -335,9 +340,43 @@ function ProfileSection({ form, setForm, onSave, saving }: {
     setForm: React.Dispatch<React.SetStateAction<ProfileFormType>>;
     onSave: () => void; saving: boolean;
 }) {
+    const { user } = useAuth();
+    const supabase = createClient();
+    const avatarInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
     };
+
+    const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !user) return;
+
+        setUploadingAvatar(true);
+
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(fileName, file, { upsert: true });
+
+        if (uploadError) {
+            alert('Upload failed: ' + uploadError.message);
+            setUploadingAvatar(false);
+            return;
+        }
+
+        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+        const publicUrl = urlData.publicUrl;
+
+        setForm(prev => ({ ...prev, avatar_url: publicUrl }));
+        await supabase.from('profiles').upsert({ id: user.id, avatar_url: publicUrl });
+
+        setUploadingAvatar(false);
+    };
+
     const filled = Object.values(form).filter(v => v.trim() !== '').length;
     const completion = Math.round((filled / Object.keys(form).length) * 100);
 
@@ -356,11 +395,29 @@ function ProfileSection({ form, setForm, onSave, saving }: {
             <div className="bg-white border border-[#E5E5DF] rounded p-7 mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Personal Information</h3>
                 <div className="flex items-center gap-5 mb-6">
-                    <div className="w-16 h-16 bg-[#E8E8E2] rounded-full flex items-center justify-center font-['Playfair_Display'] text-2xl font-bold text-[#3A3A36] border border-dashed border-[#C0C0B8]">
-                        {form.full_name ? form.full_name.slice(0, 2).toUpperCase() : 'AN'}
+                    {/* Avatar preview */}
+                    <div className="w-16 h-16 bg-[#E8E8E2] rounded-full overflow-hidden flex items-center justify-center font-['Playfair_Display'] text-2xl font-bold text-[#3A3A36] border border-dashed border-[#C0C0B8]">
+                        {form.avatar_url ? (
+                            <img src={form.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                        ) : (
+                            form.full_name ? form.full_name.slice(0, 2).toUpperCase() : 'AN'
+                        )}
                     </div>
                     <div>
-                        <button className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em]">Upload Photo</button>
+                        <input
+                            type="file"
+                            accept="image/*"
+                            ref={avatarInputRef}
+                            onChange={handleAvatarUpload}
+                            style={{ display: 'none' }}
+                        />
+                        <button
+                            onClick={() => avatarInputRef.current?.click()}
+                            disabled={uploadingAvatar}
+                            className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em]"
+                        >
+                            {uploadingAvatar ? 'Uploading...' : 'Upload Photo'}
+                        </button>
                         <p className="text-xs text-[#888880] mt-1.5">JPG or PNG · Max 2MB</p>
                     </div>
                 </div>

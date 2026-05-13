@@ -22,7 +22,7 @@ type Message = {
 export default function Header() {
     const { user, profile, signOut } = useAuth();
     const supabase = createClient();
-    const pathname = usePathname(); // ← for route‑based badge refresh
+    const pathname = usePathname();
 
     const [open, setOpen] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -47,7 +47,7 @@ export default function Header() {
             .from('messages')
             .select('*', { count: 'exact', head: true })
             .eq('receiver_id', user.id)
-            .neq('sender_id', user.id)   // safety guard
+            .neq('sender_id', user.id)
             .eq('read', false);
         if (!error) setUnreadCount(count || 0);
     }, [user, supabase]);
@@ -187,9 +187,23 @@ export default function Header() {
 
                 {user ? (
                     <>
-                        <span className="text-gray-400 normal-case text-[11px] tracking-normal ml-4">
-                            {profile?.full_name || user.email}
-                        </span>
+                        {/* Profile image instead of text name */}
+                        {profile?.avatar_url || profile?.logo_url ? (
+                            <img
+                                src={profile?.avatar_url || profile?.logo_url}
+                                alt={profile?.full_name || 'User'}
+                                className="w-6 h-6 rounded-full object-cover border border-white/20 ml-4"
+                                title={profile?.full_name || user.email}
+                            />
+                        ) : (
+                            <div
+                                className="w-6 h-6 rounded-full bg-gray-500 flex items-center justify-center text-xs font-bold text-white ml-4"
+                                title={profile?.full_name || user.email}
+                            >
+                                {(profile?.full_name || user.email)?.[0]?.toUpperCase() || '?'}
+                            </div>
+                        )}
+
                         <Link
                             href={`/dashboard/${profile?.role}`}
                             className="text-white/60 hover:text-white transition-colors"
@@ -210,8 +224,8 @@ export default function Header() {
                                     <ChatsCircle className="w-6 h-6" weight="regular" />
                                     {unreadCount > 0 && (
                                         <span className="absolute -top-2 left-1/2 -translate-x-1/2 h-4 min-w-[16px] px-1 text-[9px] font-bold rounded-full flex items-center justify-center bg-blue-100 text-blue-700 border border-blue-200">
-                                            {unreadCount > 9 ? '9+' : unreadCount}
-                                        </span>
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
                                     )}
                                 </button>
 
@@ -220,9 +234,9 @@ export default function Header() {
                                         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
                                         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 z-50">
                                             <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50 rounded-t-lg">
-                                                <span className="font-semibold text-gray-700 text-sm normal-case tracking-normal">
-                                                    Notifications
-                                                </span>
+                        <span className="font-semibold text-gray-700 text-sm normal-case tracking-normal">
+                          Notifications
+                        </span>
                                                 <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
                                                     <X className="w-4 h-4" />
                                                 </button>
@@ -247,11 +261,11 @@ export default function Header() {
                                                                 <span className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1" />
                                                             </div>
                                                             <span className="text-xs text-gray-400 mt-1 block normal-case tracking-normal">
-                                                                {new Date(m.created_at).toLocaleTimeString([], {
-                                                                    hour: '2-digit',
-                                                                    minute: '2-digit',
-                                                                })}
-                                                            </span>
+                                {new Date(m.created_at).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                })}
+                              </span>
                                                         </Link>
                                                     ))
                                                 )}

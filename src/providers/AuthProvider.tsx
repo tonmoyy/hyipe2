@@ -11,6 +11,9 @@ type Profile = {
     role: 'influencer' | 'brand' | 'admin' | 'superadmin' | null;
     email: string | null;
     status?: string;   // ← add this line
+    avatar_url?: string;
+    logo_url?: string;
+
 };
 
 type AuthContextType = {
@@ -41,7 +44,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     const fetchProfile = useCallback(async (userId: string) => {
         const { data } = await supabase
             .from('profiles')
-            .select('*')
+            .select('id, full_name, role, email, status, avatar_url, logo_url')
             .eq('id', userId)
             .single();
         if (data) {

@@ -25,6 +25,7 @@ type Campaign = {
 type BrandFormType = {
     company_name: string; industry: string; website: string;
     contact_person: string; description: string; ntn: string; payment_number: string;
+    logo_url?: string;   // ← add this
 };
 
 type CampaignFormType = {
@@ -103,6 +104,7 @@ interface RawContractRow {
 /* ─── Defaults ─── */
 const defaultBrandForm: BrandFormType = {
     company_name: '', industry: '', website: '', contact_person: '', description: '', ntn: '', payment_number: '',
+    logo_url: '',
 };
 
 const defaultCampaignForm: CampaignFormType = {
@@ -123,7 +125,11 @@ function BrandDashboardInner() {
     const campaignParam = searchParams?.get('campaign') || null;
 
     const [activeSub, setActiveSub] = useState<SubView>(initialTab);
-    const [brandForm, setBrandForm] = useState<BrandFormType>(() => ({ ...defaultBrandForm, company_name: profile?.full_name ?? '' }));
+    const [brandForm, setBrandForm] = useState<BrandFormType>(() => ({
+        ...defaultBrandForm,
+        company_name: profile?.full_name ?? '',
+        logo_url: profile?.logo_url ?? '',
+    }));
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [threads, setThreads] = useState<Thread[]>([]);
     const [applications, setApplications] = useState<Application[]>([]);
@@ -588,26 +594,89 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
     setForm: React.Dispatch<React.SetStateAction<BrandFormType>>;
     onSave: () => void; saving: boolean;
 }) {
+    const { user } = useAuth();
+    const supabase = createClient();
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingLogo, setUploadingLogo] = useState(false);
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
     };
+
+    const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !user) return;
+
+        setUploadingLogo(true);
+
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(fileName, file, { upsert: true });
+
+        if (uploadError) {
+            alert('Upload failed: ' + uploadError.message);
+            setUploadingLogo(false);
+            return;
+        }
+
+        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+        const publicUrl = urlData.publicUrl;
+
+        setForm(prev => ({ ...prev, logo_url: publicUrl }));
+        await supabase.from('profiles').upsert({ id: user.id, logo_url: publicUrl });
+
+        setUploadingLogo(false);
+    };
+
     return (
         <>
             <div className="dash-header mb-7">
                 <h1 className="font-['Playfair_Display'] text-3xl font-normal">Brand Profile</h1>
                 <p className="text-sm text-[#888880] mt-1">This information will be visible to creators when viewing your campaigns.</p>
             </div>
+
+            {/* Brand Identity Card */}
             <div className="profile-card bg-white border border-[#E5E5DF] rounded p-7 mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Brand Identity</h3>
                 <div className="profile-avatar-row flex items-center gap-5 mb-6">
-                    <div className="w-18 h-18 bg-[#E8E8E2] rounded flex items-center justify-center font-['Playfair_Display'] text-base font-bold text-[#3A3A36] border border-dashed border-[#C0C0B8] w-16 h-16" style={{ borderRadius: '4px' }}>
-                        {form.company_name?.charAt(0)?.toUpperCase() || 'B'}
+                    {/* Avatar / Logo preview */}
+                    <div
+                        className="w-16 h-16 bg-[#E8E8E2] rounded flex items-center justify-center font-['Playfair_Display'] text-2xl font-bold text-[#3A3A36] border border-dashed border-[#C0C0B8] overflow-hidden"
+                        style={{ borderRadius: '4px' }}
+                    >
+                        {form.logo_url ? (
+                            <img
+                                src={form.logo_url}
+                                alt="Brand logo"
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            (form.company_name?.charAt(0)?.toUpperCase() || 'B')
+                        )}
                     </div>
+
                     <div>
-                        <button className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em]">Upload Logo</button>
+                        <input
+                            type="file"
+                            accept="image/png, image/jpeg"
+                            ref={fileInputRef}
+                            onChange={handleLogoUpload}
+                            style={{ display: 'none' }}
+                        />
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploadingLogo}
+                            className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em] disabled:opacity-50"
+                        >
+                            {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
+                        </button>
                         <p className="text-xs text-[#888880] mt-1.5">PNG with transparent background preferred</p>
                     </div>
                 </div>
+
                 <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Brand / Company Name</label>
@@ -621,6 +690,7 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
                         </select>
                     </div>
                 </div>
+
                 <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Official Website</label>
@@ -631,11 +701,14 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
                         <input name="contact_person" value={form.contact_person} onChange={handleChange} className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
                     </div>
                 </div>
+
                 <div>
                     <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Brand Description</label>
                     <textarea name="description" value={form.description} onChange={handleChange} placeholder="Tell creators about your brand..." className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm resize-none min-h-[80px]" />
                 </div>
             </div>
+
+            {/* Verification & Trust Card */}
             <div className="profile-card bg-white border border-[#E5E5DF] rounded p-7 mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Verification & Trust</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
@@ -650,6 +723,7 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
                 </div>
                 <div className="bg-[#F0F0EA] rounded p-3.5 text-xs text-[#3A3A36]">ℹ Verified brands get a blue checkmark and are trusted more by creators. Verification takes 1–2 business days.</div>
             </div>
+
             <div className="flex justify-end gap-2.5 mt-4">
                 <button className="border border-[#0D0D0B] text-[#0D0D0B] px-4 py-2 text-xs uppercase tracking-[0.06em]">Save Draft</button>
                 <button onClick={onSave} disabled={saving} className="bg-[#0D0D0B] text-white px-7 py-2.5 text-xs uppercase tracking-[0.06em] disabled:opacity-50">{saving ? 'Saving...' : 'Save Profile'}</button>

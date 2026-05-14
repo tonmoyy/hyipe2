@@ -1,6 +1,7 @@
 // src/app/page.tsx
 import Link from 'next/link';
 import ComingSoonBanner from "@/components/ComingSoonBanner";
+import Image from "next/image";
 
 export default function HomePage() {
   return (
@@ -220,7 +221,18 @@ export default function HomePage() {
         {/* Footer */}
         <footer className="hp-footer bg-[#0D0D0B] text-white px-10 py-12 grid grid-cols-1 md:grid-cols-4 gap-10">
           <div>
-            <div className="footer-brand font-['Playfair_Display'] text-3xl font-bold mb-3">HYIPE</div>
+            <div className="footer-brand font-['Playfair_Display'] text-3xl font-bold mb-3">
+              <Link href="/" className="flex items-center h-full">
+                <Image
+                    src="/Layer 3.svg"
+                    alt="HYIPE"
+                    width={0}
+                    height={0}
+                    className="h-8 w-auto"
+                    priority
+                />
+              </Link>
+            </div>
             <div className="footer-sub text-xs text-white/40 leading-relaxed mb-5">
               Pakistan&rsquo;s first creator marketplace.<br />Secure. Transparent. Proudly Pakistani.
             </div>

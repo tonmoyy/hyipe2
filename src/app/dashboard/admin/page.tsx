@@ -17,7 +17,7 @@ interface Profile {
     email: string;
     role: string;
     created_at: string;
-    status?: string;
+    status?: string;       // 'approved' | 'banned' | 'pending' etc.
 }
 
 interface CampaignRow {
@@ -106,6 +106,7 @@ interface UserManagementProps {
     onVerifyUser: (id: string) => void;
     onViewUser: (profile: Profile) => void;
     currentAdminRole: string;
+    onToggleBan: (userId: string, currentStatus: string) => void;   // new
 }
 
 interface CampaignMonitorProps {
@@ -248,6 +249,7 @@ function AdminDashboardInner() {
     }, [supabase]);
 
     const fetchThreads = useCallback(async () => {
+        // ... (unchanged, same as previously provided)
         setLoadingThreads(true);
         const { data: threadData, error: threadError } = await supabase
             .from('conversation_threads')
@@ -291,7 +293,6 @@ function AdminDashboardInner() {
         );
 
         const threads: AdminThread[] = rawThreads.map((t) => {
-            // for threads without a campaign (direct admin chat), use "Direct Chat"
             const campaignTitle =
                 Array.isArray(t.campaign) && t.campaign.length > 0
                     ? t.campaign[0].title
@@ -323,7 +324,6 @@ function AdminDashboardInner() {
             .select('id, sender_id, receiver_id, content, created_at, read, campaign_id')
             .order('created_at', { ascending: true });
 
-        // correct handling of NULL campaign_id
         if (thread.campaign_id) {
             query = query.eq('campaign_id', thread.campaign_id);
         } else {
@@ -354,7 +354,6 @@ function AdminDashboardInner() {
         setConversationLoading(false);
     }, [supabase]);
 
-    // Auto‑open a thread from URL parameter
     useEffect(() => {
         if (threadParam && threads.length > 0 && !selectedThread) {
             const thread = threads.find((t) => t.id === threadParam);
@@ -421,6 +420,22 @@ function AdminDashboardInner() {
         }
     };
 
+    // ── NEW: Toggle Ban ──
+    const handleToggleBan = useCallback(async (userId: string, currentStatus: string) => {
+        const newStatus = currentStatus === 'banned' ? 'active' : 'banned';
+        const { error } = await supabase
+            .from('profiles')
+            .update({ status: newStatus })
+            .eq('id', userId);
+        if (error) {
+            alert('Failed to update user status: ' + error.message);
+        } else {
+            setAllProfiles((prev) =>
+                prev.map((p) => (p.id === userId ? { ...p, status: newStatus } : p))
+            );
+        }
+    }, [supabase]);
+
     const handlePromoteToAdmin = async () => {
         if (!makeAdminEmail.trim()) return;
         setMakeAdminLoading(true);
@@ -448,7 +463,6 @@ function AdminDashboardInner() {
         if (!user || !newChatRecipientId) return;
         setCreatingChat(true);
 
-        // 1. Create a conversation_thread (admin as influencer, recipient as brand)
         const { data: thread, error: threadErr } = await supabase
             .from('conversation_threads')
             .insert({
@@ -468,7 +482,6 @@ function AdminDashboardInner() {
             return;
         }
 
-        // 2. If a message was typed, insert it
         if (newChatMessage.trim()) {
             await supabase.from('messages').insert({
                 sender_id: user.id,
@@ -479,7 +492,6 @@ function AdminDashboardInner() {
             });
         }
 
-        // 3. Refresh threads and navigate to the new thread
         await fetchThreads();
         setShowNewChatModal(false);
         setNewChatRecipientId('');
@@ -544,7 +556,8 @@ function AdminDashboardInner() {
     if (profile?.role === 'superadmin') {
         navItems.push({ key: 'make-admin', icon: '⚡', label: 'Make Admin' });
     }
-    // Real‑time update for admin inbox
+
+    // Real‑time update for admin inbox (unchanged)
     useEffect(() => {
         if (!user) return;
 
@@ -554,9 +567,7 @@ function AdminDashboardInner() {
                 'postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'messages' },
                 () => {
-                    // Refresh threads to update last_message
                     fetchThreads();
-                    // If we’re currently viewing a thread, reload its conversation
                     if (selectedThread) {
                         loadConversation(selectedThread);
                     }
@@ -616,6 +627,7 @@ function AdminDashboardInner() {
                         onRemoveUser={handleRemoveUser} onVerifyUser={handleVerifyUser}
                         onViewUser={(p) => setViewProfile(p)}
                         currentAdminRole={profile?.role ?? 'admin'}
+                        onToggleBan={handleToggleBan}
                     />
                 )}
                 {activeSub === 'monitor' && (
@@ -722,10 +734,11 @@ function AdminDashboardInner() {
     );
 }
 
-/* ─── User Management Section (unchanged) ─── */
+/* ─── Updated User Management Section (with Ban button) ─── */
 function UserManagementSection({
                                    allProfiles, loading, searchQuery, setSearchQuery, roleFilter, setRoleFilter,
                                    page, setPage, pageSize, onRemoveUser, onVerifyUser, onViewUser, currentAdminRole,
+                                   onToggleBan,
                                }: UserManagementProps) {
     const filtered = allProfiles
         .filter((p) => (roleFilter === 'all' ? true : p.role === roleFilter))
@@ -773,24 +786,46 @@ function UserManagementSection({
                 ) : paginated.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-4 text-sm text-[#888880]">No users found.</td></tr>
                 ) : (
-                    paginated.map((p) => (
-                        <tr key={p.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                            <td className="px-4 py-3 text-sm"><strong>{p.full_name}</strong></td>
-                            <td className="px-4 py-3 text-sm">{p.email}</td>
-                            <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">{p.role}</span></td>
-                            <td className="px-4 py-3 text-sm">{new Date(p.created_at).toLocaleDateString()}</td>
-                            <td className="px-4 py-3 text-sm"><span className={`status-badge px-2.5 py-1 rounded text-[10px] uppercase font-medium ${p.status === 'active' ? 'bg-[#E8F5E0] text-[#2A6000]' : 'bg-[#FFF8E6] text-[#7A5200]'}`}>{p.status || 'Pending'}</span></td>
-                            <td className="admin-actions flex gap-1.5">
-                                <button onClick={() => onViewUser(p)} className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
-                                {p.status !== 'active' && (
-                                    <button onClick={() => onVerifyUser(p.id)} className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Verify</button>
-                                )}
-                                {canDelete(p.role) && (
-                                    <button onClick={() => onRemoveUser(p.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
-                                )}
-                            </td>
-                        </tr>
-                    ))
+                    paginated.map((p) => {
+                        const status = p.status || 'pending';
+                        // Determine status badge styling
+                        let statusStyle = 'bg-[#FFF8E6] text-[#7A5200]'; // pending default
+                        if (status === 'active') statusStyle = 'bg-[#E8F5E0] text-[#2A6000]';
+                        if (status === 'banned') statusStyle = 'bg-[#FCE4E4] text-[#A32020]';
+                        if (status === 'active') statusStyle = 'bg-[#E8F5E0] text-[#2A6000]'; // treat active same as approved
+
+                        return (
+                            <tr key={p.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
+                                <td className="px-4 py-3 text-sm"><strong>{p.full_name}</strong></td>
+                                <td className="px-4 py-3 text-sm">{p.email}</td>
+                                <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">{p.role}</span></td>
+                                <td className="px-4 py-3 text-sm">{new Date(p.created_at).toLocaleDateString()}</td>
+                                <td className="px-4 py-3 text-sm">
+                                    <span className={`status-badge px-2.5 py-1 rounded text-[10px] uppercase font-medium ${statusStyle}`}>
+                                        {status}
+                                    </span>
+                                </td>
+                                <td className="admin-actions flex gap-1.5">
+                                    <button onClick={() => onViewUser(p)} className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
+                                    {p.role !== 'admin' && p.role !== 'superadmin' && (
+                                        <button
+                                            onClick={() => onToggleBan(p.id, status)}
+                                            className={`btn-sm px-3 py-1 text-[10px] uppercase ${
+                                                status === 'banned'
+                                                    ? 'border border-green-600 text-green-600 bg-green-50'
+                                                    : 'border border-red-500 text-red-500 bg-red-50'
+                                            }`}
+                                        >
+                                            {status === 'banned' ? 'Unban' : 'Ban'}
+                                        </button>
+                                    )}
+                                    {canDelete(p.role) && (
+                                        <button onClick={() => onRemoveUser(p.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
+                                    )}
+                                </td>
+                            </tr>
+                        );
+                    })
                 )}
                 </tbody>
             </table>
@@ -944,7 +979,7 @@ function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: Cam
     );
 }
 
-/* ─── Updated Admin Inbox Section (with new chat & reply) ─── */
+/* ─── Admin Inbox Section (unchanged) ─── */
 function AdminInboxSection({
                                threads,
                                loading,
@@ -967,7 +1002,6 @@ function AdminInboxSection({
         setReplyText('');
     };
 
-    // Determine the header title: show campaign name if it exists, otherwise "Direct Chat"
     const headerTitle = selectedThread
         ? (selectedThread.campaign_title !== 'Direct Chat'
             ? selectedThread.campaign_title
@@ -1084,7 +1118,6 @@ function AdminInboxSection({
                                 )}
                             </div>
 
-                            {/* Reply input (only if admin is a participant) */}
                             {canSend && (
                                 <div className="border-t border-[#E5E5DF] px-4 py-3 flex gap-2.5 flex-shrink-0 bg-white">
                                     <input

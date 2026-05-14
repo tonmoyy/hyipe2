@@ -417,6 +417,16 @@ function BrandDashboardInner() {
     const inboxUnreadCount = threads.filter(t => t.unread).length;
     const contractsCount = contracts.filter(c => c.status === 'active').length;
 
+    // ── BANNED CHECK ──
+    if (profile?.status === 'banned') {
+        return (
+            <div className="p-10 text-center">
+                <h1 className="text-2xl font-bold text-red-600">Account Suspended</h1>
+                <p>Your account has been banned. You cannot post new campaigns.</p>
+            </div>
+        );
+    }
+
     // Sidebar content (used both on desktop and mobile overlay)
     const sidebarContent = (
         <>
@@ -493,6 +503,7 @@ function BrandDashboardInner() {
                     {activeSub === 'profile' && (
                         <BrandProfileSection form={brandForm} setForm={setBrandForm} onSave={handleSaveProfile} saving={savingProfile} />
                     )}
+
                     {activeSub === 'campaigns' && (
                         <CampaignsSection campaigns={campaigns} loading={loadingCampaigns} openCampModal={() => setShowCampModal(true)} />
                     )}
@@ -751,6 +762,7 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
 function CampaignsSection({ campaigns, loading, openCampModal }: {
     campaigns: Campaign[]; loading: boolean; openCampModal: () => void;
 }) {
+    // ... (unchanged)
     const [activeTab, setActiveTab] = useState<'all' | 'under_review' | 'live' | 'completed'>('all');
     const filtered = activeTab === 'all' ? campaigns : campaigns.filter(c => c.status === activeTab);
     const count = (tab: string) => tab === 'all' ? campaigns.length : campaigns.filter(c => c.status === tab).length;
@@ -811,6 +823,7 @@ function ApplicationsSection({ applications, loading, onAccept, onReject, onMess
     onAccept: (id: string) => void; onReject: (id: string) => void;
     onMessage: (appId: string, influencerId: string, campaignId: string) => void;
 }) {
+    // ... (unchanged)
     const pendingApps = applications.filter(a => a.status === 'applied');
     const acceptedApps = applications.filter(a => a.status === 'accepted');
     const rejectedApps = applications.filter(a => a.status === 'rejected');
@@ -900,6 +913,7 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
     contracts: Contract[]; loading: boolean; currentUserId: string;
     supabase: ReturnType<typeof createClient>; onRefresh: () => void;
 }) {
+    // ... (unchanged)
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [addingTo, setAddingTo] = useState<string | null>(null);
     const [newMilestone, setNewMilestone] = useState({ title: '', description: '', amount: '', due_date: '' });
@@ -1116,6 +1130,7 @@ function BrandInboxSection({
     initialPartnerId: string | null;
     initialCampaignId: string | null;
 }) {
+    // ... (unchanged)
     const supabase = createClient();
     const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
     const [conversation, setConversation] = useState<Message[]>([]);

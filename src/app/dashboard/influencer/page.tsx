@@ -1,8 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 'use client';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import Link from 'next/link';
 import DashboardRoleGuard from '@/components/DashboardRoleGuard';
@@ -52,7 +51,7 @@ type ProfileFormType = {
     bio: string; ig_handle: string; ig_followers: string; tiktok_handle: string;
     tiktok_followers: string; yt_url: string; yt_subscribers: string;
     primary_niche: string; secondary_niche: string; rate_ig_post: string; rate_video: string;
-    avatar_url?: string;   // ← add this
+    avatar_url?: string;
 };
 
 interface RawApplicationRow {
@@ -85,7 +84,7 @@ const defaultForm: ProfileFormType = {
     full_name: '', display_name: '', city: '', phone: '', bio: '',
     ig_handle: '', ig_followers: '', tiktok_handle: '', tiktok_followers: '',
     yt_url: '', yt_subscribers: '', primary_niche: '', secondary_niche: '',
-    rate_ig_post: '', rate_video: '',avatar_url: '',
+    rate_ig_post: '', rate_video: '', avatar_url: '',
 };
 
 /* ─── Main Component ─── */
@@ -93,7 +92,7 @@ function InfluencerDashboardInner() {
     const { user, profile, signOut } = useAuth();
     const supabase = createClient();
     const searchParams = useSearchParams();
-    const router=useRouter();
+    const router = useRouter();
 
     const tabParam = searchParams?.get('tab') as SubView | null;
     const initialTab: SubView = tabParam && ['profile','projects','inbox','contracts'].includes(tabParam) ? tabParam : 'profile';
@@ -113,6 +112,9 @@ function InfluencerDashboardInner() {
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [loadingContracts, setLoadingContracts] = useState(false);
     const [savingProfile, setSavingProfile] = useState(false);
+
+    // Mobile sidebar toggle
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
     /* ─── Data Fetching ─── */
     const fetchProjects = useCallback(async () => {
@@ -145,10 +147,10 @@ function InfluencerDashboardInner() {
         const { data } = await supabase
             .from('conversation_threads')
             .select(`
-        *,
-        campaign:campaigns(title),
-        brand:profiles!conversation_threads_brand_id_fkey(full_name)
-      `)
+                *,
+                campaign:campaigns(title),
+                brand:profiles!conversation_threads_brand_id_fkey(full_name)
+            `)
             .eq('influencer_id', user.id)
             .eq('started_by_brand', true)
             .order('last_message_at', { ascending: false });
@@ -161,7 +163,7 @@ function InfluencerDashboardInner() {
             campaign_title: thread.campaign?.title || 'Campaign',
             last_message: thread.last_message || '',
             last_at: thread.last_message_at || thread.created_at,
-            unread: false,   // you may later calculate unread from messages
+            unread: false,
         }));
 
         setThreads(mappedThreads);
@@ -175,19 +177,19 @@ function InfluencerDashboardInner() {
         const { data } = await supabase
             .from('contracts')
             .select(`
-        id,
-        campaign_id,
-        brand_id,
-        influencer_id,
-        application_id,
-        status,
-        created_at,
-        title,
-        budget,
-        brand:brand_id ( full_name ),
-        campaign:campaign_id ( title ),
-        milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
-      `)
+                id,
+                campaign_id,
+                brand_id,
+                influencer_id,
+                application_id,
+                status,
+                created_at,
+                title,
+                budget,
+                brand:brand_id ( full_name ),
+                campaign:campaign_id ( title ),
+                milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
+            `)
             .eq('influencer_id', user.id)
             .order('created_at', { ascending: false });
 
@@ -217,6 +219,7 @@ function InfluencerDashboardInner() {
     /* ─── Tab Switching ─── */
     const switchTab = useCallback(async (tab: SubView) => {
         setActiveSub(tab);
+        setMobileSidebarOpen(false); // close mobile sidebar on tab switch
         if (tab === 'projects') await fetchProjects();
         if (tab === 'inbox') await fetchMessages();
         if (tab === 'contracts') await fetchContracts();
@@ -255,65 +258,91 @@ function InfluencerDashboardInner() {
     const inboxUnreadCount = threads.filter(t => t.unread).length;
     const activeContractsCount = contracts.filter(c => c.status === 'active').length;
 
-    return (
-        <div className="dashboard-shell flex" style={{ height: 'calc(100vh - 48px)' }}>
-            {/* Sidebar */}
-            <aside className="sidebar bg-white border-r border-[#E5E5DF] w-[220px] flex flex-col py-7 px-0 flex-shrink-0">
-                <div className="sidebar-brand px-6 mb-8">
+    // Sidebar content (used both on desktop and mobile overlay)
+    const sidebarContent = (
+        <>
+            <div className="sidebar-brand px-6 mb-8 flex items-center justify-between">
+                <div>
                     <Link href="/" className="logo font-['Playfair_Display'] text-lg font-bold">HYIPE</Link>
                     <span className="role-pill text-[9px] uppercase text-white bg-[#0D0D0B] px-1.5 py-0.5 rounded-full inline-block mt-1">Creator</span>
                 </div>
-                <nav className="sidebar-nav flex-1 px-3">
-                    {([
-                        { key: 'profile',   icon: '◎',  label: 'My Profile' },
-                        { key: 'projects',  icon: '◈',  label: 'My Projects' },
-                        { key: 'contracts', icon: '📄', label: 'Contracts', badge: activeContractsCount },
-                        { key: 'inbox',     icon: '◻',  label: 'Inbox',     badge: inboxUnreadCount },
-                    ] as { key: SubView; icon: string; label: string; badge?: number }[]).map(({ key, icon, label, badge }) => (
-                        <button key={key} onClick={() => {
-                            router.push(`/dashboard/influencer?tab=${key}`, { scroll: false });
+                {/* close button for mobile overlay */}
+                <button
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className="lg:hidden text-gray-500 hover:text-black text-lg leading-none"
+                >
+                    ✕
+                </button>
+            </div>
+            <nav className="sidebar-nav flex-1 px-3">
+                {([
+                    { key: 'profile',   icon: '◎',  label: 'My Profile' },
+                    { key: 'projects',  icon: '◈',  label: 'My Projects' },
+                    { key: 'contracts', icon: '📄', label: 'Contracts', badge: activeContractsCount },
+                    { key: 'inbox',     icon: '◻',  label: 'Inbox',     badge: inboxUnreadCount },
+                ] as { key: SubView; icon: string; label: string; badge?: number }[]).map(({ key, icon, label, badge }) => (
+                    <button key={key} onClick={() => {
+                        router.push(`/dashboard/influencer?tab=${key}`, { scroll: false });
+                        setMobileSidebarOpen(false);
+                    }}
+                            className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
+                                activeSub === key ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
+                            }`}>
+                        <span className="text-[13px] opacity-50">{icon}</span>
+                        {label}
+                        {badge != null && badge > 0 && (
+                            <span className="ml-auto bg-[#0D0D0B] text-white text-[9px] px-1.5 py-0.5 rounded-full">{badge}</span>
+                        )}
+                    </button>
+                ))}
+            </nav>
+            <div className="sidebar-user mt-auto px-6 py-4 border-t border-[#E5E5DF]">
+                <div className="text-sm font-medium">{profile?.full_name || 'Creator'}</div>
+                <div className="text-[11px] text-[#888880]">{user?.email}</div>
+                <button onClick={() => signOut()} className="text-[11px] text-[#888880] underline mt-1.5 inline-block">← Back to site</button>
+            </div>
+        </>
+    );
 
-                        }}
-                                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
-                                    activeSub === key ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
-                                }`}>
-                            <span className="text-[13px] opacity-50">{icon}</span>
-                            {label}
-                            {badge != null && badge > 0 && (
-                                <span className="ml-auto bg-[#0D0D0B] text-white text-[9px] px-1.5 py-0.5 rounded-full">{badge}</span>
-                            )}
-                        </button>
-                    ))}
-                </nav>
-                <div className="sidebar-user mt-auto px-6 py-4 border-t border-[#E5E5DF]">
-                    <div className="text-sm font-medium">{profile?.full_name || 'Creator'}</div>
-                    <div className="text-[11px] text-[#888880]">{user?.email}</div>
-                    <button onClick={() => signOut()} className="text-[11px] text-[#888880] underline mt-1.5 inline-block">← Back to site</button>
+    return (
+        <div className="dashboard-shell flex" style={{ height: 'calc(100vh - 48px)' }}>
+            {/* Mobile sidebar overlay */}
+            {mobileSidebarOpen && (
+                <div className="fixed inset-0 z-50 lg:hidden">
+                    <div className="absolute inset-0 bg-black/40" onClick={() => setMobileSidebarOpen(false)} />
+                    <aside className="absolute left-0 top-0 h-full w-[220px] bg-white border-r border-[#E5E5DF] flex flex-col py-7 px-0 z-50 shadow-xl">
+                        {sidebarContent}
+                    </aside>
                 </div>
+            )}
+
+            {/* Desktop sidebar – always visible on lg+ screens */}
+            <aside className="sidebar !hidden lg:!flex bg-white border-r border-[#E5E5DF] w-[220px] flex-col py-7 px-0 flex-shrink-0">
+                {sidebarContent}
             </aside>
 
             {/* Main content */}
             <main className="dash-content bg-[#F6F6F2] flex-1 overflow-hidden flex flex-col">
-                {activeSub === 'profile' && (
-                    <div className="flex-1 overflow-y-auto p-10">
+                {/* Mobile header with hamburger */}
+                <div className="lg:hidden flex items-center p-4 bg-white border-b border-[#E5E5DF]">
+                    <button onClick={() => setMobileSidebarOpen(true)} className="text-xl font-bold mr-3">☰</button>
+                    <span className="font-['Playfair_Display'] text-lg font-bold">HYIPE</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-10">
+                    {activeSub === 'profile' && (
                         <ProfileSection form={profileForm} setForm={setProfileForm} onSave={handleSaveProfile} saving={savingProfile} />
-                    </div>
-                )}
-                {activeSub === 'projects' && (
-                    <div className="flex-1 overflow-y-auto p-10">
+                    )}
+                    {activeSub === 'projects' && (
                         <ProjectsSection applications={applications} loading={loadingProjects} />
-                    </div>
-                )}
-                {activeSub === 'contracts' && (
-                    <div className="flex-1 overflow-y-auto p-10">
+                    )}
+                    {activeSub === 'contracts' && (
                         <ContractsSection
                             contracts={contracts} loading={loadingContracts}
                             supabase={supabase} onRefresh={fetchContracts}
                         />
-                    </div>
-                )}
-                {activeSub === 'inbox' && (
-                    <div className="flex-1 overflow-hidden flex flex-col p-10 pb-0">
+                    )}
+                    {activeSub === 'inbox' && (
                         <InboxSection
                             key={`${partnerParam}-${campaignParam}`}
                             threads={threads} loading={loadingMessages}
@@ -323,8 +352,8 @@ function InfluencerDashboardInner() {
                             initialPartnerId={partnerParam}
                             initialCampaignId={campaignParam}
                         />
-                    </div>
-                )}
+                    )}
+                </div>
             </main>
         </div>
     );
@@ -352,7 +381,6 @@ function ProfileSection({ form, setForm, onSave, saving }: {
     const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file || !user) return;
-
         setUploadingAvatar(true);
 
         const fileExt = file.name.split('.').pop();
@@ -373,7 +401,6 @@ function ProfileSection({ form, setForm, onSave, saving }: {
 
         setForm(prev => ({ ...prev, avatar_url: publicUrl }));
         await supabase.from('profiles').upsert({ id: user.id, avatar_url: publicUrl });
-
         setUploadingAvatar(false);
     };
 
@@ -382,20 +409,19 @@ function ProfileSection({ form, setForm, onSave, saving }: {
 
     return (
         <>
-            <div className="dash-header mb-7">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">My Profile</h1>
+            <div className="dash-header mb-5 md:mb-7">
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">My Profile</h1>
                 <p className="text-sm text-[#888880] mt-1">Complete your profile to start applying for campaigns.</p>
             </div>
-            <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded p-3.5 mb-6 text-sm flex justify-between items-center">
+            <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded p-3.5 mb-6 text-sm flex flex-col sm:flex-row justify-between items-center gap-2">
                 <span>⚠ Your profile is {completion}% complete.</span>
-                <div className="w-40 h-1 bg-[#F0F0EA] rounded">
+                <div className="w-full sm:w-40 h-1 bg-[#F0F0EA] rounded">
                     <div className="bg-[#0D0D0B] h-1 rounded" style={{ width: `${completion}%` }} />
                 </div>
             </div>
-            <div className="bg-white border border-[#E5E5DF] rounded p-7 mb-5">
+            <div className="bg-white border border-[#E5E5DF] rounded p-4 md:p-7 mb-4 md:mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Personal Information</h3>
-                <div className="flex items-center gap-5 mb-6">
-                    {/* Avatar preview */}
+                <div className="flex flex-col sm:flex-row items-start gap-4 mb-6">
                     <div className="w-16 h-16 bg-[#E8E8E2] rounded-full overflow-hidden flex items-center justify-center font-['Playfair_Display'] text-2xl font-bold text-[#3A3A36] border border-dashed border-[#C0C0B8]">
                         {form.avatar_url ? (
                             <img src={form.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
@@ -404,24 +430,15 @@ function ProfileSection({ form, setForm, onSave, saving }: {
                         )}
                     </div>
                     <div>
-                        <input
-                            type="file"
-                            accept="image/*"
-                            ref={avatarInputRef}
-                            onChange={handleAvatarUpload}
-                            style={{ display: 'none' }}
-                        />
-                        <button
-                            onClick={() => avatarInputRef.current?.click()}
-                            disabled={uploadingAvatar}
-                            className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em]"
-                        >
+                        <input type="file" accept="image/*" ref={avatarInputRef} onChange={handleAvatarUpload} style={{ display: 'none' }} />
+                        <button onClick={() => avatarInputRef.current?.click()} disabled={uploadingAvatar}
+                                className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em]">
                             {uploadingAvatar ? 'Uploading...' : 'Upload Photo'}
                         </button>
                         <p className="text-xs text-[#888880] mt-1.5">JPG or PNG · Max 2MB</p>
                     </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Full Name</label>
                         <input name="full_name" value={form.full_name} onChange={handleChange} className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -431,7 +448,7 @@ function ProfileSection({ form, setForm, onSave, saving }: {
                         <input name="display_name" value={form.display_name} onChange={handleChange} placeholder="@handle" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
                     </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">City</label>
                         <input name="city" value={form.city} onChange={handleChange} placeholder="Karachi" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -446,9 +463,9 @@ function ProfileSection({ form, setForm, onSave, saving }: {
                     <textarea name="bio" value={form.bio} onChange={handleChange} maxLength={200} placeholder="Tell brands about yourself..." className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm resize-none min-h-[80px]" />
                 </div>
             </div>
-            <div className="bg-white border border-[#E5E5DF] rounded p-7 mb-5">
+            <div className="bg-white border border-[#E5E5DF] rounded p-4 md:p-7 mb-4 md:mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Social Media & Reach</h3>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Instagram Handle</label>
                         <input name="ig_handle" value={form.ig_handle} onChange={handleChange} placeholder="@handle" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -458,7 +475,7 @@ function ProfileSection({ form, setForm, onSave, saving }: {
                         <input name="ig_followers" value={form.ig_followers} onChange={handleChange} placeholder="e.g. 120000" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
                     </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">TikTok Handle</label>
                         <input name="tiktok_handle" value={form.tiktok_handle} onChange={handleChange} placeholder="@handle" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -468,7 +485,7 @@ function ProfileSection({ form, setForm, onSave, saving }: {
                         <input name="tiktok_followers" value={form.tiktok_followers} onChange={handleChange} placeholder="e.g. 80000" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
                     </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">YouTube Channel URL</label>
                         <input name="yt_url" value={form.yt_url} onChange={handleChange} placeholder="https://youtube.com/..." className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -479,9 +496,9 @@ function ProfileSection({ form, setForm, onSave, saving }: {
                     </div>
                 </div>
             </div>
-            <div className="bg-white border border-[#E5E5DF] rounded p-7 mb-5">
+            <div className="bg-white border border-[#E5E5DF] rounded p-4 md:p-7 mb-4 md:mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Niche & Rates</h3>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Primary Niche</label>
                         <select name="primary_niche" value={form.primary_niche} onChange={handleChange} className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm bg-white">
@@ -497,7 +514,7 @@ function ProfileSection({ form, setForm, onSave, saving }: {
                         </select>
                     </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Rate per Instagram Post (PKR)</label>
                         <input name="rate_ig_post" value={form.rate_ig_post} onChange={handleChange} placeholder="e.g. 25000" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -539,8 +556,8 @@ function ProjectsSection({ applications, loading }: { applications: Application[
 
     return (
         <>
-            <div className="dash-header mb-7">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">My Projects</h1>
+            <div className="dash-header mb-5 md:mb-7">
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">My Projects</h1>
                 <p className="text-sm text-[#888880] mt-1">Campaigns you&apos;ve applied to or are working on.</p>
             </div>
             <div className="flex justify-end mb-4">
@@ -548,10 +565,10 @@ function ProjectsSection({ applications, loading }: { applications: Application[
                     Search for New Projects →
                 </Link>
             </div>
-            <div className="flex border-b border-[#E5E5DF] mb-6">
+            <div className="flex border-b border-[#E5E5DF] mb-6 overflow-x-auto">
                 {(['all','applied','accepted','completed'] as const).map(tab => (
                     <button key={tab} onClick={() => setActiveTab(tab)}
-                            className={`px-5 py-2.5 text-xs uppercase tracking-[0.06em] border-b-2 ${activeTab === tab ? 'border-[#0D0D0B] text-[#0D0D0B] font-medium' : 'border-transparent text-[#888880] hover:text-[#0D0D0B]'}`}>
+                            className={`px-5 py-2.5 text-xs uppercase tracking-[0.06em] border-b-2 ${activeTab === tab ? 'border-[#0D0D0B] text-[#0D0D0B] font-medium' : 'border-transparent text-[#888880] hover:text-[#0D0D0B]'} whitespace-nowrap`}>
                         {tab} ({count(tab)})
                     </button>
                 ))}
@@ -563,7 +580,7 @@ function ProjectsSection({ applications, loading }: { applications: Application[
             ) : (
                 <div className="flex flex-col gap-3">
                     {filtered.map(app => (
-                        <div key={app.id} className="bg-white border border-[#E5E5DF] rounded p-4 grid grid-cols-[1fr_auto] gap-3 items-center">
+                        <div key={app.id} className="bg-white border border-[#E5E5DF] rounded p-4 flex flex-col sm:flex-row justify-between gap-3">
                             <div>
                                 <h4 className="text-sm font-medium">{app.campaign.title}</h4>
                                 <div className="text-xs text-[#888880]">{app.campaign.brand.full_name}</div>
@@ -613,8 +630,8 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
 
     return (
         <>
-            <div className="dash-header mb-7">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">Contracts</h1>
+            <div className="dash-header mb-5 md:mb-7">
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Contracts</h1>
                 <p className="text-sm text-[#888880] mt-1">Track your milestones and payments from brands.</p>
             </div>
 
@@ -635,7 +652,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                                 const paidAmount = contract.milestones.filter(m => m.status === 'paid').reduce((s, m) => s + m.amount, 0);
                                 return (
                                     <div key={contract.id} className="bg-white border border-[#E5E5DF] rounded">
-                                        <div className="p-4 flex justify-between items-start cursor-pointer" onClick={() => setExpandedId(isOpen ? null : contract.id)}>
+                                        <div className="p-4 flex flex-col sm:flex-row justify-between items-start cursor-pointer" onClick={() => setExpandedId(isOpen ? null : contract.id)}>
                                             <div>
                                                 <h4 className="text-sm font-medium">{contract.campaign_title}</h4>
                                                 <div className="text-xs text-[#888880] mt-0.5">Brand: {contract.brand_name}</div>
@@ -643,7 +660,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                                                     {contract.milestones.length} milestone{contract.milestones.length !== 1 ? 's' : ''} · Rs. {paidAmount.toLocaleString()} / {totalBudget.toLocaleString()} received
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 mt-2 sm:mt-0">
                                                 <span className="bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span>
                                                 <span className="text-xs text-[#888880]">{isOpen ? '▲' : '▼'}</span>
                                             </div>
@@ -670,7 +687,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                                                 ) : (
                                                     <div className="flex flex-col gap-2">
                                                         {contract.milestones.map((m, idx) => (
-                                                            <div key={m.id} className="border border-[#E5E5DF] rounded p-3 flex justify-between items-start gap-3">
+                                                            <div key={m.id} className="border border-[#E5E5DF] rounded p-3 flex flex-col sm:flex-row justify-between items-start gap-3">
                                                                 <div className="flex-1">
                                                                     <div className="flex items-center gap-2">
                                                                         <span className="text-xs text-[#888880] font-medium">#{idx + 1}</span>
@@ -734,7 +751,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
     );
 }
 
-/* ─── Inbox Section (fixed) ─── */
+/* ─── Inbox Section ─── */
 function InboxSection({
                           threads,
                           loading,
@@ -801,7 +818,7 @@ function InboxSection({
         setTimeout(() => inputRef.current?.focus(), 100);
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
-    // Auto‑open thread from URL params (no initialLoadDone ref)
+    // Auto‑open thread from URL params
     useEffect(() => {
         if (!initialPartnerId || threads.length === 0) return;
 
@@ -849,12 +866,12 @@ function InboxSection({
     return (
         <div className="flex flex-col flex-1 overflow-hidden">
             <div className="dash-header mb-4 flex-shrink-0">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">Inbox</h1>
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Inbox</h1>
                 <p className="text-sm text-[#888880] mt-1">Campaign-scoped messages from brands.</p>
             </div>
-            <div className="flex-1 min-h-0 grid grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
                 {/* Thread List */}
-                <div className="border-r border-[#E5E5DF] flex flex-col min-h-0">
+                <div className="border-r md:border-r border-b md:border-b-0 border-[#E5E5DF] flex flex-col min-h-0">
                     <div className="px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium flex-shrink-0">
                         Conversations
                     </div>
@@ -894,7 +911,7 @@ function InboxSection({
                 <div className="flex flex-col min-h-0">
                     {selectedThread ? (
                         <>
-                            <div className="px-5 py-4 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
+                            <div className="px-4 py-3 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
                                 <div className="w-9 h-9 rounded-full bg-[#E8E8E2] flex items-center justify-center text-sm font-medium flex-shrink-0">
                                     {selectedThread.partner_name.slice(0, 2).toUpperCase()}
                                 </div>
@@ -905,14 +922,14 @@ function InboxSection({
                                     )}
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3">
+                            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
                                 {conversationLoading ? (
                                     <div className="text-sm text-[#888880]">Loading...</div>
                                 ) : conversation.length === 0 ? (
                                     <div className="text-sm text-[#888880]">No messages yet.</div>
                                 ) : (
                                     conversation.map(msg => (
-                                        <div key={msg.id} className={`max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed ${
+                                        <div key={msg.id} className={`max-w-[85%] sm:max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed ${
                                             msg.sender_id === currentUserId ? 'bg-[#0D0D0B] text-white self-end' : 'bg-[#F0F0EA] self-start'
                                         }`}>
                                             {msg.content}
@@ -930,7 +947,7 @@ function InboxSection({
                                        placeholder="Type a message..."
                                        className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none focus:border-[#0D0D0B] transition-colors" />
                                 <button onClick={handleSendReply} disabled={!replyText.trim()}
-                                        className="bg-[#0D0D0B] text-white px-5 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50 flex-shrink-0">
+                                        className="bg-[#0D0D0B] text-white px-4 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50 flex-shrink-0">
                                     Send
                                 </button>
                             </div>

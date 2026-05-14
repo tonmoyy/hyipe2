@@ -25,7 +25,7 @@ type Campaign = {
 type BrandFormType = {
     company_name: string; industry: string; website: string;
     contact_person: string; description: string; ntn: string; payment_number: string;
-    logo_url?: string;   // ← add this
+    logo_url?: string;
 };
 
 type CampaignFormType = {
@@ -145,6 +145,9 @@ function BrandDashboardInner() {
     const [campaignForm, setCampaignForm] = useState<CampaignFormType>(defaultCampaignForm);
     const [submittingCampaign, setSubmittingCampaign] = useState(false);
 
+    // Mobile sidebar toggle
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
     /* ─── Data Fetching ─── */
     const fetchCampaigns = useCallback(async () => {
         if (!user) return;
@@ -169,10 +172,10 @@ function BrandDashboardInner() {
         const { data } = await supabase
             .from('conversation_threads')
             .select(`
-        *,
-        campaign:campaigns(title),
-        influencer:profiles!conversation_threads_influencer_id_fkey(full_name)
-      `)
+                *,
+                campaign:campaigns(title),
+                influencer:profiles!conversation_threads_influencer_id_fkey(full_name)
+            `)
             .eq('brand_id', user.id)
             .order('last_message_at', { ascending: false });
 
@@ -224,17 +227,17 @@ function BrandDashboardInner() {
         const { data: contractsData, error } = await supabase
             .from('contracts')
             .select(`
-        id,
-        campaign_id,
-        brand_id,
-        influencer_id,
-        application_id,
-        status,
-        created_at,
-        title,
-        budget,
-        milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
-      `)
+                id,
+                campaign_id,
+                brand_id,
+                influencer_id,
+                application_id,
+                status,
+                created_at,
+                title,
+                budget,
+                milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
+            `)
             .eq('brand_id', user.id)
             .order('created_at', { ascending: false });
 
@@ -288,6 +291,7 @@ function BrandDashboardInner() {
     /* ─── Tab Switching ─── */
     const switchTab = useCallback(async (tab: SubView) => {
         setActiveSub(tab);
+        setMobileSidebarOpen(false); // close mobile sidebar on tab switch
         if (tab === 'campaigns') await fetchCampaigns();
         if (tab === 'inbox') await fetchMessages();
         if (tab === 'applications') { await fetchCampaigns(); }
@@ -299,7 +303,7 @@ function BrandDashboardInner() {
         if (tabParam && tabParam !== activeSub) {
             switchTab(tabParam);
         }
-    }, [tabParam]); // switchTab is stable; ESLint may warn but it's intentional
+    }, [tabParam]);
 
     /* ─── Handlers ─── */
     const handleSaveProfile = async () => {
@@ -413,78 +417,102 @@ function BrandDashboardInner() {
     const inboxUnreadCount = threads.filter(t => t.unread).length;
     const contractsCount = contracts.filter(c => c.status === 'active').length;
 
-    return (
-        <div className="dashboard-shell flex" style={{ height: 'calc(100vh - 48px)' }}>
-            {/* Sidebar */}
-            <aside className="sidebar bg-white border-r border-[#E5E5DF] w-[220px] flex flex-col py-7 px-0 flex-shrink-0">
-                <div className="sidebar-brand px-6 mb-8">
+    // Sidebar content (used both on desktop and mobile overlay)
+    const sidebarContent = (
+        <>
+            <div className="sidebar-brand px-6 mb-8 flex items-center justify-between">
+                <div>
                     <Link href="/" className="logo font-['Playfair_Display'] text-lg font-bold">HYIPE</Link>
                     <span className="text-[9px] uppercase text-white bg-[#5E7A0A] px-1.5 py-0.5 rounded-full inline-block mt-1">Brand</span>
                 </div>
-                <nav className="sidebar-nav flex-1 px-3">
-                    {([
-                        { key: 'profile',      icon: '◎',  label: 'Brand Profile' },
-                        { key: 'campaigns',    icon: '◈',  label: 'My Campaigns' },
-                        { key: 'applications', icon: '📋', label: 'Applications' },
-                        { key: 'contracts',    icon: '📄', label: 'Contracts', badge: contractsCount },
-                        { key: 'inbox',        icon: '◻',  label: 'Inbox',     badge: inboxUnreadCount },
-                    ] as { key: SubView; icon: string; label: string; badge?: number }[]).map(({ key, icon, label, badge }) => (
-                        <button key={key} onClick={() => {
-                            router.push(`/dashboard/brand?tab=${key}`, { scroll: false });
-                        }}
+                {/* close button for mobile overlay */}
+                <button
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className="lg:hidden text-gray-500 hover:text-black text-lg leading-none"
+                >
+                    ✕
+                </button>
+            </div>
+            <nav className="sidebar-nav flex-1 px-3">
+                {([
+                    { key: 'profile',      icon: '◎',  label: 'Brand Profile' },
+                    { key: 'campaigns',    icon: '◈',  label: 'My Campaigns' },
+                    { key: 'applications', icon: '📋', label: 'Applications' },
+                    { key: 'contracts',    icon: '📄', label: 'Contracts', badge: contractsCount },
+                    { key: 'inbox',        icon: '◻',  label: 'Inbox',     badge: inboxUnreadCount },
+                ] as { key: SubView; icon: string; label: string; badge?: number }[]).map(({ key, icon, label, badge }) => (
+                    <button key={key} onClick={() => {
+                        router.push(`/dashboard/brand?tab=${key}`, { scroll: false });
+                        setMobileSidebarOpen(false);
+                    }}
+                            className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
+                                activeSub === key ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
+                            }`}>
+                        <span className="text-[13px] opacity-50">{icon}</span>
+                        {label}
+                        {badge != null && badge > 0 && (
+                            <span className="ml-auto bg-[#0D0D0B] text-white text-[9px] px-1.5 py-0.5 rounded-full">{badge}</span>
+                        )}
+                    </button>
+                ))}
+            </nav>
+            <div className="mt-auto px-6 py-4 border-t border-[#E5E5DF]">
+                <div className="text-sm font-medium">{profile?.full_name || 'Brand'}</div>
+                <div className="text-[11px] text-[#888880]">{user?.email}</div>
+                <button onClick={() => signOut()} className="text-[11px] text-[#888880] underline mt-1.5 inline-block">← Back to site</button>
+            </div>
+        </>
+    );
 
-                                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
-                                    activeSub === key ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
-                                }`}>
-                            <span className="text-[13px] opacity-50">{icon}</span>
-                            {label}
-                            {badge != null && badge > 0 && (
-                                <span className="ml-auto bg-[#0D0D0B] text-white text-[9px] px-1.5 py-0.5 rounded-full">{badge}</span>
-                            )}
-                        </button>
-                    ))}
-                </nav>
-                <div className="mt-auto px-6 py-4 border-t border-[#E5E5DF]">
-                    <div className="text-sm font-medium">{profile?.full_name || 'Brand'}</div>
-                    <div className="text-[11px] text-[#888880]">{user?.email}</div>
-                    <button onClick={() => signOut()} className="text-[11px] text-[#888880] underline mt-1.5 inline-block">← Back to site</button>
+    return (
+        <div className="dashboard-shell flex" style={{ height: 'calc(100vh - 48px)' }}>
+            {/* Mobile sidebar overlay */}
+            {mobileSidebarOpen && (
+                <div className="fixed inset-0 z-50 lg:hidden">
+                    <div className="absolute inset-0 bg-black/40" onClick={() => setMobileSidebarOpen(false)} />
+                    <aside className="absolute left-0 top-0 h-full w-[220px] bg-white border-r border-[#E5E5DF] flex flex-col py-7 px-0 z-50 shadow-xl">
+                        {sidebarContent}
+                    </aside>
                 </div>
+            )}
+
+            {/* Desktop sidebar – always visible on lg+ screens */}
+            <aside className="sidebar !hidden lg:!flex bg-white border-r border-[#E5E5DF] w-[220px] flex-col py-7 px-0 flex-shrink-0">
+                {sidebarContent}
             </aside>
 
             {/* Main Content */}
             <main className="dash-content bg-[#F6F6F2] flex-1 overflow-hidden flex flex-col">
-                {activeSub === 'profile' && (
-                    <div className="flex-1 overflow-y-auto p-10">
+                {/* Mobile header with hamburger */}
+                <div className="lg:hidden flex items-center p-4 bg-white border-b border-[#E5E5DF]">
+                    <button onClick={() => setMobileSidebarOpen(true)} className="text-xl font-bold mr-3">☰</button>
+                    <span className="font-['Playfair_Display'] text-lg font-bold">HYIPE</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 md:p-10">
+                    {activeSub === 'profile' && (
                         <BrandProfileSection form={brandForm} setForm={setBrandForm} onSave={handleSaveProfile} saving={savingProfile} />
-                    </div>
-                )}
-                {activeSub === 'campaigns' && (
-                    <div className="flex-1 overflow-y-auto p-10">
+                    )}
+                    {activeSub === 'campaigns' && (
                         <CampaignsSection campaigns={campaigns} loading={loadingCampaigns} openCampModal={() => setShowCampModal(true)} />
-                    </div>
-                )}
-                {activeSub === 'applications' && (
-                    <div className="flex-1 overflow-y-auto p-10">
+                    )}
+                    {activeSub === 'applications' && (
                         <ApplicationsSection
                             applications={applications} loading={loadingApplications}
                             onAccept={handleAcceptApplication} onReject={handleRejectApplication}
                             onMessage={handleStartConversation}
                         />
-                    </div>
-                )}
-                {activeSub === 'contracts' && (
-                    <div className="flex-1 overflow-y-auto p-10">
+                    )}
+                    {activeSub === 'contracts' && (
                         <ContractsSection
                             contracts={contracts} loading={loadingContracts}
                             currentUserId={user!.id} supabase={supabase}
                             onRefresh={fetchContracts}
                         />
-                    </div>
-                )}
-                {activeSub === 'inbox' && (
-                    <div className="flex-1 overflow-hidden flex flex-col p-10 pb-0">
+                    )}
+                    {activeSub === 'inbox' && (
                         <BrandInboxSection
-                            key={`${partnerParam}-${campaignParam}`}  // ← forces re-mount when chat changes
+                            key={`${partnerParam}-${campaignParam}`}
                             threads={threads} loading={loadingMessages}
                             currentUserId={user!.id}
                             onThreadRead={handleThreadRead}
@@ -492,14 +520,14 @@ function BrandDashboardInner() {
                             initialPartnerId={partnerParam}
                             initialCampaignId={campaignParam}
                         />
-                    </div>
-                )}
+                    )}
+                </div>
             </main>
 
             {/* Campaign Modal */}
             {showCampModal && (
-                <div className="fixed inset-0 bg-black/45 z-[200] flex items-center justify-center">
-                    <div className="bg-white rounded p-9 max-w-[560px] w-[90%] max-h-[85vh] overflow-y-auto">
+                <div className="fixed inset-0 bg-black/45 z-[200] flex items-center justify-center p-4">
+                    <div className="bg-white rounded p-6 md:p-9 max-w-[560px] w-full max-h-[90vh] overflow-y-auto">
                         <h2 className="font-['Playfair_Display'] text-2xl mb-1">Post a New Campaign</h2>
                         <p className="text-xs text-[#888880] mb-6">Fill in your campaign brief. It will be reviewed by HYIPE before going live.</p>
                         <div className="mb-4">
@@ -507,7 +535,7 @@ function BrandDashboardInner() {
                             <input value={campaignForm.title} onChange={e => setCampaignForm(p => ({ ...p, title: e.target.value }))}
                                    placeholder="e.g. Summer Eid Collection Launch" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
                         </div>
-                        <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Niche / Category</label>
                                 <select value={campaignForm.niche} onChange={e => setCampaignForm(p => ({ ...p, niche: e.target.value }))} className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm bg-white">
@@ -522,7 +550,7 @@ function BrandDashboardInner() {
                                 </select>
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Budget (PKR)</label>
                                 <input value={campaignForm.budget} onChange={e => setCampaignForm(p => ({ ...p, budget: e.target.value }))}
@@ -539,7 +567,7 @@ function BrandDashboardInner() {
                             <textarea value={campaignForm.brief} onChange={e => setCampaignForm(p => ({ ...p, brief: e.target.value }))}
                                       placeholder="Describe what you need, tone, references..." className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm min-h-[100px]" />
                         </div>
-                        <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Minimum Followers</label>
                                 <input value={campaignForm.min_followers} onChange={e => setCampaignForm(p => ({ ...p, min_followers: e.target.value }))}
@@ -569,8 +597,8 @@ function BrandDashboardInner() {
 
             {/* Campaign Success Overlay */}
             {showCampSuccess && (
-                <div className="fixed inset-0 bg-black/50 z-[300] flex items-center justify-center">
-                    <div className="bg-white rounded p-12 text-center max-w-[400px]">
+                <div className="fixed inset-0 bg-black/50 z-[300] flex items-center justify-center p-4">
+                    <div className="bg-white rounded p-8 md:p-12 text-center max-w-[400px] w-full">
                         <div className="w-14 h-14 border-2 border-[#0D0D0B] rounded-full mx-auto mb-5 flex items-center justify-center text-2xl">✓</div>
                         <h2 className="font-['Playfair_Display'] text-2xl mb-2.5">Campaign Submitted!</h2>
                         <p className="text-sm text-[#3A3A36] mb-6">Your campaign has been submitted for review and will be posted once approved. This usually takes 1–2 business days.</p>
@@ -633,51 +661,38 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
 
     return (
         <>
-            <div className="dash-header mb-7">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">Brand Profile</h1>
+            <div className="dash-header mb-5 md:mb-7">
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Brand Profile</h1>
                 <p className="text-sm text-[#888880] mt-1">This information will be visible to creators when viewing your campaigns.</p>
             </div>
 
             {/* Brand Identity Card */}
-            <div className="profile-card bg-white border border-[#E5E5DF] rounded p-7 mb-5">
+            <div className="profile-card bg-white border border-[#E5E5DF] rounded p-4 md:p-7 mb-4 md:mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Brand Identity</h3>
-                <div className="profile-avatar-row flex items-center gap-5 mb-6">
+                <div className="profile-avatar-row flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6">
                     {/* Avatar / Logo preview */}
                     <div
                         className="w-16 h-16 bg-[#E8E8E2] rounded flex items-center justify-center font-['Playfair_Display'] text-2xl font-bold text-[#3A3A36] border border-dashed border-[#C0C0B8] overflow-hidden"
                         style={{ borderRadius: '4px' }}
                     >
                         {form.logo_url ? (
-                            <img
-                                src={form.logo_url}
-                                alt="Brand logo"
-                                className="w-full h-full object-cover"
-                            />
+                            <img src={form.logo_url} alt="Brand logo" className="w-full h-full object-cover" />
                         ) : (
                             (form.company_name?.charAt(0)?.toUpperCase() || 'B')
                         )}
                     </div>
 
                     <div>
-                        <input
-                            type="file"
-                            accept="image/png, image/jpeg"
-                            ref={fileInputRef}
-                            onChange={handleLogoUpload}
-                            style={{ display: 'none' }}
-                        />
-                        <button
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={uploadingLogo}
-                            className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em] disabled:opacity-50"
-                        >
+                        <input type="file" accept="image/png, image/jpeg" ref={fileInputRef} onChange={handleLogoUpload} style={{ display: 'none' }} />
+                        <button onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo}
+                                className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1.5 text-[11px] uppercase tracking-[0.06em] disabled:opacity-50">
                             {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
                         </button>
                         <p className="text-xs text-[#888880] mt-1.5">PNG with transparent background preferred</p>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Brand / Company Name</label>
                         <input name="company_name" value={form.company_name} onChange={handleChange} className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -691,7 +706,7 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
                     </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">Official Website</label>
                         <input name="website" value={form.website} onChange={handleChange} placeholder="https://..." className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -709,9 +724,9 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
             </div>
 
             {/* Verification & Trust Card */}
-            <div className="profile-card bg-white border border-[#E5E5DF] rounded p-7 mb-5">
+            <div className="profile-card bg-white border border-[#E5E5DF] rounded p-4 md:p-7 mb-4 md:mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Verification & Trust</h3>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-[11px] uppercase tracking-[0.08em] text-[#888880] mb-1.5">National Tax Number (NTN)</label>
                         <input name="ntn" value={form.ntn} onChange={handleChange} placeholder="For verified badge" className="w-full p-2.5 border border-[#E5E5DF] rounded text-sm" />
@@ -750,16 +765,16 @@ function CampaignsSection({ campaigns, loading, openCampModal }: {
     };
     return (
         <>
-            <div className="dash-header mb-7">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">My Campaigns</h1>
+            <div className="dash-header mb-5 md:mb-7">
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">My Campaigns</h1>
                 <p className="text-sm text-[#888880] mt-1">Create, manage, and track your influencer campaigns.</p>
             </div>
             <div className="flex justify-end mb-4">
                 <button onClick={openCampModal} className="bg-[#0D0D0B] text-white px-4 py-2 text-xs uppercase tracking-[0.06em]">+ Post a New Campaign</button>
             </div>
-            <div className="flex border-b border-[#E5E5DF] mb-6">
+            <div className="flex border-b border-[#E5E5DF] mb-6 overflow-x-auto">
                 {(['all','under_review','live','completed'] as const).map(tab => (
-                    <button key={tab} onClick={() => setActiveTab(tab)} className={`px-5 py-2.5 text-xs uppercase tracking-[0.06em] border-b-2 ${activeTab === tab ? 'border-[#0D0D0B] text-[#0D0D0B] font-medium' : 'border-transparent text-[#888880] hover:text-[#0D0D0B]'}`}>
+                    <button key={tab} onClick={() => setActiveTab(tab)} className={`px-5 py-2.5 text-xs uppercase tracking-[0.06em] border-b-2 ${activeTab === tab ? 'border-[#0D0D0B] text-[#0D0D0B] font-medium' : 'border-transparent text-[#888880] hover:text-[#0D0D0B]'} whitespace-nowrap`}>
                         {tab.replace('_', ' ')} ({count(tab)})
                     </button>
                 ))}
@@ -771,7 +786,7 @@ function CampaignsSection({ campaigns, loading, openCampModal }: {
             ) : (
                 <div className="flex flex-col gap-3">
                     {filtered.map(c => (
-                        <div key={c.id} className="bg-white border border-[#E5E5DF] rounded p-4 grid grid-cols-[1fr_auto] gap-3 items-center">
+                        <div key={c.id} className="bg-white border border-[#E5E5DF] rounded p-4 flex flex-col sm:flex-row justify-between gap-3">
                             <div>
                                 <h4 className="text-sm font-medium">{c.title}</h4>
                                 <div className="text-xs text-[#888880]">{c.applications_count} Applications · {c.niche}</div>
@@ -812,8 +827,8 @@ function ApplicationsSection({ applications, loading, onAccept, onReject, onMess
 
     return (
         <>
-            <div className="dash-header mb-7">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">Applications</h1>
+            <div className="dash-header mb-5 md:mb-7">
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Applications</h1>
                 <p className="text-sm text-[#888880] mt-1">Review influencer applications. Accepting one creates a contract and opens a campaign conversation.</p>
             </div>
             {loading ? (
@@ -827,7 +842,7 @@ function ApplicationsSection({ applications, loading, onAccept, onReject, onMess
                         <div className="flex flex-col gap-3 mb-6">
                             <h3 className="font-medium text-sm">Pending ({pendingApps.length})</h3>
                             {pendingApps.map(app => (
-                                <div key={app.id} className="bg-white border border-[#E5E5DF] rounded p-4 flex justify-between items-start gap-4">
+                                <div key={app.id} className="bg-white border border-[#E5E5DF] rounded p-4 flex flex-col sm:flex-row justify-between items-start gap-4">
                                     <div className="flex-1">
                                         <div className="text-sm font-medium">{app.influencer?.full_name || 'Influencer'}</div>
                                         <div className="text-xs text-[#888880]">{app.influencer?.email}</div>
@@ -836,13 +851,8 @@ function ApplicationsSection({ applications, loading, onAccept, onReject, onMess
                                     </div>
                                     <div className="flex flex-col gap-2 items-end flex-shrink-0">
                                         {statusBadge(app.status)}
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => onAccept(app.id)}
-                                                className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase"
-                                            >
-                                                Accept → Start Contract
-                                            </button>
+                                        <div className="flex gap-2 flex-wrap">
+                                            <button onClick={() => onAccept(app.id)} className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Accept → Start Contract</button>
                                             <button onClick={() => onReject(app.id)} className="border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
                                             <button onClick={() => onMessage(app.id, app.influencer_id, app.campaign_id)} className="border border-[#0D0D0B] text-[#0D0D0B] px-3 py-1 text-[10px] uppercase">Message</button>
                                         </div>
@@ -917,14 +927,12 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
     };
 
     const handleApproveMilestone = async (milestoneId: string) => {
-        const { error } = await supabase
-            .from('milestones').update({ status: 'approved' }).eq('id', milestoneId);
+        const { error } = await supabase.from('milestones').update({ status: 'approved' }).eq('id', milestoneId);
         if (!error) onRefresh();
     };
 
     const handleMarkPaid = async (milestoneId: string) => {
-        const { error } = await supabase
-            .from('milestones').update({ status: 'paid' }).eq('id', milestoneId);
+        const { error } = await supabase.from('milestones').update({ status: 'paid' }).eq('id', milestoneId);
         if (!error) onRefresh();
     };
 
@@ -949,8 +957,8 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
 
     return (
         <>
-            <div className="dash-header mb-7">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">Contracts</h1>
+            <div className="dash-header mb-5 md:mb-7">
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Contracts</h1>
                 <p className="text-sm text-[#888880] mt-1">Manage milestones and payments for accepted campaigns.</p>
             </div>
 
@@ -974,7 +982,7 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
                                     return (
                                         <div key={contract.id} className="bg-white border border-[#E5E5DF] rounded">
                                             {/* Contract Header */}
-                                            <div className="p-4 flex justify-between items-start cursor-pointer" onClick={() => setExpandedId(isOpen ? null : contract.id)}>
+                                            <div className="p-4 flex flex-col sm:flex-row justify-between items-start cursor-pointer" onClick={() => setExpandedId(isOpen ? null : contract.id)}>
                                                 <div>
                                                     <h4 className="text-sm font-medium">{contract.campaign_title}</h4>
                                                     <div className="text-xs text-[#888880] mt-0.5">Creator: {contract.influencer_name}</div>
@@ -982,7 +990,7 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
                                                         {contract.milestones.length} milestone{contract.milestones.length !== 1 ? 's' : ''} · Rs. {paidAmount.toLocaleString()} / {totalBudget.toLocaleString()} paid
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 mt-2 sm:mt-0">
                                                     <span className="bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Active</span>
                                                     <span className="text-xs text-[#888880]">{isOpen ? '▲' : '▼'}</span>
                                                 </div>
@@ -1009,7 +1017,7 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
                                                     ) : (
                                                         <div className="flex flex-col gap-2 mb-4">
                                                             {contract.milestones.map((m, idx) => (
-                                                                <div key={m.id} className="border border-[#E5E5DF] rounded p-3 flex justify-between items-start gap-3">
+                                                                <div key={m.id} className="border border-[#E5E5DF] rounded p-3 flex flex-col sm:flex-row justify-between items-start gap-3">
                                                                     <div className="flex-1">
                                                                         <div className="flex items-center gap-2">
                                                                             <span className="text-xs text-[#888880] font-medium">#{idx + 1}</span>
@@ -1024,14 +1032,10 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
                                                                     <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                                                                         {milestoneStatusBadge(m.status)}
                                                                         {m.status === 'submitted' && (
-                                                                            <button onClick={() => handleApproveMilestone(m.id)} className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-2 py-0.5 text-[10px] uppercase">
-                                                                                Approve
-                                                                            </button>
+                                                                            <button onClick={() => handleApproveMilestone(m.id)} className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-2 py-0.5 text-[10px] uppercase">Approve</button>
                                                                         )}
                                                                         {m.status === 'approved' && (
-                                                                            <button onClick={() => handleMarkPaid(m.id)} className="bg-[#0D0D0B] text-white px-2 py-0.5 text-[10px] uppercase">
-                                                                                Mark Paid
-                                                                            </button>
+                                                                            <button onClick={() => handleMarkPaid(m.id)} className="bg-[#0D0D0B] text-white px-2 py-0.5 text-[10px] uppercase">Mark Paid</button>
                                                                         )}
                                                                     </div>
                                                                 </div>
@@ -1043,34 +1047,22 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
                                                     {addingTo === contract.id ? (
                                                         <div className="border border-[#E5E5DF] rounded p-3 bg-[#F6F6F2]">
                                                             <div className="text-xs uppercase tracking-[0.06em] text-[#888880] mb-2">New Milestone</div>
-                                                            <div className="grid grid-cols-2 gap-2 mb-2">
-                                                                <input placeholder="Title" value={newMilestone.title} onChange={e => setNewMilestone(p => ({ ...p, title: e.target.value }))}
-                                                                       className="p-2 border border-[#E5E5DF] rounded text-xs col-span-2" />
-                                                                <input placeholder="Description (optional)" value={newMilestone.description} onChange={e => setNewMilestone(p => ({ ...p, description: e.target.value }))}
-                                                                       className="p-2 border border-[#E5E5DF] rounded text-xs col-span-2" />
-                                                                <input placeholder="Amount (PKR)" value={newMilestone.amount} onChange={e => setNewMilestone(p => ({ ...p, amount: e.target.value }))}
-                                                                       className="p-2 border border-[#E5E5DF] rounded text-xs" />
-                                                                <input type="date" value={newMilestone.due_date} onChange={e => setNewMilestone(p => ({ ...p, due_date: e.target.value }))}
-                                                                       className="p-2 border border-[#E5E5DF] rounded text-xs" />
+                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                                                                <input placeholder="Title" value={newMilestone.title} onChange={e => setNewMilestone(p => ({ ...p, title: e.target.value }))} className="p-2 border border-[#E5E5DF] rounded text-xs col-span-2 sm:col-span-2" />
+                                                                <input placeholder="Description (optional)" value={newMilestone.description} onChange={e => setNewMilestone(p => ({ ...p, description: e.target.value }))} className="p-2 border border-[#E5E5DF] rounded text-xs col-span-2 sm:col-span-2" />
+                                                                <input placeholder="Amount (PKR)" value={newMilestone.amount} onChange={e => setNewMilestone(p => ({ ...p, amount: e.target.value }))} className="p-2 border border-[#E5E5DF] rounded text-xs" />
+                                                                <input type="date" value={newMilestone.due_date} onChange={e => setNewMilestone(p => ({ ...p, due_date: e.target.value }))} className="p-2 border border-[#E5E5DF] rounded text-xs" />
                                                             </div>
                                                             <div className="flex gap-2">
-                                                                <button onClick={() => { setAddingTo(null); setNewMilestone({ title: '', description: '', amount: '', due_date: '' }); }}
-                                                                        className="border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">Cancel</button>
-                                                                <button onClick={() => handleAddMilestone(contract.id)} disabled={savingMilestone || !newMilestone.title.trim()}
-                                                                        className="bg-[#0D0D0B] text-white px-3 py-1 text-[10px] uppercase disabled:opacity-50">
-                                                                    {savingMilestone ? 'Saving...' : 'Add Milestone'}
-                                                                </button>
+                                                                <button onClick={() => { setAddingTo(null); setNewMilestone({ title: '', description: '', amount: '', due_date: '' }); }} className="border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">Cancel</button>
+                                                                <button onClick={() => handleAddMilestone(contract.id)} disabled={savingMilestone || !newMilestone.title.trim()} className="bg-[#0D0D0B] text-white px-3 py-1 text-[10px] uppercase disabled:opacity-50">{savingMilestone ? 'Saving...' : 'Add Milestone'}</button>
                                                             </div>
                                                         </div>
                                                     ) : (
                                                         <div className="flex gap-2">
-                                                            <button onClick={() => setAddingTo(contract.id)} className="border border-[#E5E5DF] text-[#3A3A36] px-3 py-1.5 text-[10px] uppercase">
-                                                                + Add Milestone
-                                                            </button>
+                                                            <button onClick={() => setAddingTo(contract.id)} className="border border-[#E5E5DF] text-[#3A3A36] px-3 py-1.5 text-[10px] uppercase">+ Add Milestone</button>
                                                             {allApproved && (
-                                                                <button onClick={() => handleCompleteContract(contract.id)} className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1.5 text-[10px] uppercase">
-                                                                    Mark Contract Complete
-                                                                </button>
+                                                                <button onClick={() => handleCompleteContract(contract.id)} className="border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1.5 text-[10px] uppercase">Mark Contract Complete</button>
                                                             )}
                                                         </div>
                                                     )}
@@ -1101,13 +1093,12 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
                     )}
                 </>
             )}
-            {/* Suppress unused var warning */}
             <span style={{ display: 'none' }}>{currentUserId}</span>
         </>
     );
 }
 
-/* ─── Brand Inbox Section (fixed) ─── */
+/* ─── Brand Inbox Section ─── */
 function BrandInboxSection({
                                threads,
                                loading,
@@ -1174,7 +1165,7 @@ function BrandInboxSection({
         setTimeout(() => inputRef.current?.focus(), 100);
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
-    // Auto‑open thread from URL params (no initialLoadDone ref)
+    // Auto‑open thread from URL params
     useEffect(() => {
         if (!initialPartnerId || threads.length === 0) return;
 
@@ -1220,15 +1211,15 @@ function BrandInboxSection({
     };
 
     return (
-        <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-hidden h-full">
             <div className="dash-header mb-4 flex-shrink-0">
-                <h1 className="font-['Playfair_Display'] text-3xl font-normal">Inbox</h1>
+                <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Inbox</h1>
                 <p className="text-sm text-[#888880] mt-1">Campaign-scoped conversations with creators.</p>
             </div>
 
-            <div className="flex-1 min-h-0 grid grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
                 {/* Thread List */}
-                <div className="border-r border-[#E5E5DF] flex flex-col min-h-0">
+                <div className="border-r md:border-r border-b md:border-b-0 border-[#E5E5DF] flex flex-col min-h-0">
                     <div className="px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium flex-shrink-0">
                         Conversations
                     </div>
@@ -1268,7 +1259,7 @@ function BrandInboxSection({
                 <div className="flex flex-col min-h-0">
                     {selectedThread ? (
                         <>
-                            <div className="px-5 py-4 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
+                            <div className="px-4 py-3 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
                                 <div className="w-9 h-9 rounded-full bg-[#E8E8E2] flex items-center justify-center text-sm font-medium flex-shrink-0">
                                     {selectedThread.partner_name.slice(0, 2).toUpperCase()}
                                 </div>
@@ -1279,14 +1270,14 @@ function BrandInboxSection({
                                     )}
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3">
+                            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
                                 {conversationLoading ? (
                                     <div className="text-sm text-[#888880]">Loading...</div>
                                 ) : conversation.length === 0 ? (
                                     <div className="text-sm text-[#888880]">No messages yet.</div>
                                 ) : (
                                     conversation.map(msg => (
-                                        <div key={msg.id} className={`max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed ${
+                                        <div key={msg.id} className={`max-w-[85%] sm:max-w-[70%] px-3 py-2.5 rounded text-sm leading-relaxed ${
                                             msg.sender_id === currentUserId ? 'bg-[#0D0D0B] text-white self-end' : 'bg-[#F0F0EA] self-start'
                                         }`}>
                                             {msg.content}
@@ -1298,13 +1289,13 @@ function BrandInboxSection({
                                 )}
                                 <div ref={convoEndRef} />
                             </div>
-                            <div className="border-t border-[#E5E5DF] px-4 py-3 flex gap-2.5 flex-shrink-0 bg-white">
+                            <div className="border-t border-[#E5E5DF] p-3 flex gap-2.5 flex-shrink-0 bg-white">
                                 <input ref={inputRef} value={replyText} onChange={e => setReplyText(e.target.value)}
                                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
                                        placeholder="Type a message..."
                                        className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none focus:border-[#0D0D0B] transition-colors" />
                                 <button onClick={handleSendReply} disabled={!replyText.trim()}
-                                        className="bg-[#0D0D0B] text-white px-5 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50 flex-shrink-0">
+                                        className="bg-[#0D0D0B] text-white px-4 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50 flex-shrink-0">
                                     Send
                                 </button>
                             </div>

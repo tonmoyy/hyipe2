@@ -9,34 +9,36 @@ export default function HomePage() {
         <ComingSoonBanner />
 
         {/* Hero */}
-        <section className="hp-hero max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-15 px-10 py-20">
+        <section className="hp-hero max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-15 px-4 md:px-10 py-12 md:py-20">
           <div>
-            <p className="hp-hero-tag font-cinzel font-bold tracking-[0.15em] uppercase">Pakistan&rsquo;s First Influencer Marketplace</p>
-            <h1 className="font-['Playfair_Display'] text-6xl leading-tight font-bold mb-7">
-              Where Brands <br/> Meet <em className="text-[#888880] italic">Real</em><br />Creators.
+            <p className="hp-hero-tag font-cinzel font-bold tracking-[0.15em] uppercase text-sm md:text-base">
+              Pakistan&rsquo;s First Influencer Marketplace
+            </p>
+            <h1 className="font-['Playfair_Display'] text-4xl md:text-6xl leading-tight font-bold mb-4 md:mb-7">
+              Where Brands <br className="hidden sm:block" /> Meet <em className="text-[#888880] italic">Real</em><br />Creators.
             </h1>
-            <p className="text-[15px] text-[#3A3A36] leading-relaxed mb-8 max-w-[380px]">
+            <p className="text-sm md:text-[15px] text-[#3A3A36] leading-relaxed mb-6 md:mb-8 max-w-[380px]">
               HYIPE connects Pakistani brands with verified content creators through a transparent, escrow-backed system. No more chasing payments. No more unpaid work.
             </p>
-            <div className="flex gap-3">
-              <Link href="/auth" className="btn-primary bg-[#0D0D0B] text-white px-7 py-3 text-[13px] uppercase tracking-[0.08em]">
+            <div className="flex gap-3 flex-wrap">
+              <Link href="/auth" className="btn-primary bg-[#0D0D0B] text-white px-5 py-2.5 md:px-7 md:py-3 text-xs md:text-[13px] uppercase tracking-[0.08em]">
                 I&rsquo;m a Brand →
               </Link>
-              <Link href="/auth" className="btn-outline border border-[#0D0D0B] text-[#0D0D0B] px-7 py-3 text-[13px] uppercase tracking-[0.08em]">
+              <Link href="/auth" className="btn-outline border border-[#0D0D0B] text-[#0D0D0B] px-5 py-2.5 md:px-7 md:py-3 text-xs md:text-[13px] uppercase tracking-[0.08em]">
                 I&rsquo;m a Creator →
               </Link>
             </div>
           </div>
-          <div className="relative">
-            <div className="hero-img-placeholder bg-[#E8E8E2] rounded h-[420px] flex flex-col items-center justify-center gap-2 text-[#888880] text-xs uppercase tracking-[0.05em] border border-dashed border-[#C8C8C0]">
+          <div className="relative mt-10 md:mt-0">
+            <div className="hero-img-placeholder bg-[#E8E8E2] rounded h-60 sm:h-80 md:h-[420px] flex flex-col items-center justify-center gap-2 text-[#888880] text-xs uppercase tracking-[0.05em] border border-dashed border-[#C8C8C0]">
               [ Campaign preview image ]<br />
               <span className="text-[10px] opacity-60">Full-bleed lifestyle photo<br />of creator at work</span>
             </div>
-            <div className="hero-float-badge absolute bottom-8 -left-8 bg-white border border-[#E5E5DF] rounded p-3 text-xs">
-              <strong className="block text-lg font-['Playfair_Display']">Rs. 2.4M+</strong>
+            <div className="hero-float-badge absolute bottom-4 -left-0 md:bottom-8 md:-left-8 bg-white border border-[#E5E5DF] rounded p-2 md:p-3 text-xs shadow-sm">
+              <strong className="block text-base md:text-lg font-['Playfair_Display']">Rs. 2.4M+</strong>
               Paid out to creators
             </div>
-            <div className="hero-float-badge2 absolute top-8 -right-5 bg-[#C8F04A] rounded p-2.5 text-[11px] font-medium uppercase tracking-[0.05em]">
+            <div className="hero-float-badge2 absolute top-4 -right-2 md:top-8 md:-right-5 bg-[#C8F04A] rounded p-2 md:p-2.5 text-[10px] md:text-[11px] font-medium uppercase tracking-[0.05em] shadow-sm">
               ✓ Escrow Protected
             </div>
           </div>
@@ -44,7 +46,7 @@ export default function HomePage() {
 
         {/* Brand Marquee */}
         <div className="marquee-strip border-t border-b border-[#E5E5DF] py-4 overflow-hidden bg-white">
-          <div className="marquee-inner">
+          <div className="marquee-inner whitespace-nowrap">
             <span className="marquee-item">Khaadi</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Dawlance</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Bata Pakistan</span><span className="marquee-sep">·</span>
@@ -70,12 +72,12 @@ export default function HomePage() {
         </div>
 
         {/* Featured Creators */}
-        <section className="hp-section max-w-[1200px] mx-auto px-10 py-20">
-          <div className="hp-section-header flex justify-between items-baseline border-b border-[#E5E5DF] pb-4 mb-10">
-            <h2 className="font-['Playfair_Display'] text-4xl font-normal">Featured Creators</h2>
-            <span className="text-xs text-[#888880] uppercase tracking-[0.08em]">Browse all creators →</span>
+        <section className="hp-section max-w-[1200px] mx-auto px-4 md:px-10 py-12 md:py-20">
+          <div className="hp-section-header flex justify-between items-baseline border-b border-[#E5E5DF] pb-4 mb-6 md:mb-10">
+            <h2 className="font-['Playfair_Display'] text-3xl md:text-4xl font-normal">Featured Creators</h2>
+            <span className="text-xs text-[#888880] uppercase tracking-[0.08em] hidden sm:inline">Browse all creators →</span>
           </div>
-          <div className="creators-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="creators-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
             {/* Creator 1 */}
             <div className="creator-card border border-[#E5E5DF] rounded overflow-hidden bg-white">
               <div className="creator-card-img h-44 bg-[#E8E8E2] flex items-center justify-center text-[11px] text-[#888880] uppercase tracking-[0.05em] border-b border-[#E5E5DF]">
@@ -87,7 +89,7 @@ export default function HomePage() {
                 <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
                   <span>280K followers</span><span>·</span><span>4.2% eng.</span>
                 </div>
-                <div className="mt-2 flex gap-1">
+                <div className="mt-2 flex gap-1 flex-wrap">
                   <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">Instagram</span>
                   <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">TikTok</span>
                 </div>
@@ -104,7 +106,7 @@ export default function HomePage() {
                 <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
                   <span>520K followers</span><span>·</span><span>3.8% eng.</span>
                 </div>
-                <div className="mt-2 flex gap-1">
+                <div className="mt-2 flex gap-1 flex-wrap">
                   <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">YouTube</span>
                   <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">Instagram</span>
                 </div>
@@ -121,7 +123,7 @@ export default function HomePage() {
                 <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
                   <span>190K followers</span><span>·</span><span>5.1% eng.</span>
                 </div>
-                <div className="mt-2 flex gap-1">
+                <div className="mt-2 flex gap-1 flex-wrap">
                   <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">Instagram</span>
                 </div>
               </div>
@@ -137,7 +139,7 @@ export default function HomePage() {
                 <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
                   <span>145K followers</span><span>·</span><span>6.2% eng.</span>
                 </div>
-                <div className="mt-2 flex gap-1">
+                <div className="mt-2 flex gap-1 flex-wrap">
                   <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">YouTube</span>
                   <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">TikTok</span>
                 </div>
@@ -147,14 +149,14 @@ export default function HomePage() {
         </section>
 
         {/* CTA Box */}
-        <section className="px-10 py-20">
-          <div className="cta-box bg-[#0D0D0B] text-white rounded p-16 flex flex-col md:flex-row items-center justify-between max-w-[1120px] mx-auto">
-            <h2 className="font-['Playfair_Display'] text-5xl leading-tight max-w-[500px]">
+        <section className="px-4 md:px-10 py-12 md:py-20">
+          <div className="cta-box bg-[#0D0D0B] text-white rounded p-8 md:p-16 flex flex-col md:flex-row items-center justify-between gap-6 max-w-[1120px] mx-auto">
+            <h2 className="font-['Playfair_Display'] text-3xl md:text-5xl leading-tight max-w-[500px] text-center md:text-left">
               Ready to run<br />your first <em className="text-white/50 italic">campaign?</em>
             </h2>
-            <div className="cta-box-right flex flex-col gap-3 items-end">
-              <div className="text-xs text-white/40 text-right mb-2">Trusted by 200+ brands across Pakistan</div>
-              <Link href="/auth" className="btn-lime bg-[#C8F04A] text-[#0D0D0B] px-7 py-3 text-xs font-medium uppercase tracking-[0.08em]">
+            <div className="cta-box-right flex flex-col gap-3 items-center md:items-end">
+              <div className="text-xs text-white/40 text-center md:text-right mb-2">Trusted by 200+ brands across Pakistan</div>
+              <Link href="/auth" className="btn-lime bg-[#C8F04A] text-[#0D0D0B] px-6 py-2.5 md:px-7 md:py-3 text-xs font-medium uppercase tracking-[0.08em]">
                 Post a Campaign →
               </Link>
               <button className="bg-transparent border-none text-white/50 text-xs cursor-pointer mt-1">
@@ -165,12 +167,12 @@ export default function HomePage() {
         </section>
 
         {/* Founder Note */}
-        <section className="founder-section max-w-[800px] mx-auto my-16 px-10">
+        <section className="founder-section max-w-[800px] mx-auto my-12 md:my-16 px-4 md:px-10">
           <div className="founder-tag text-[11px] tracking-[0.12em] uppercase text-[#888880] mb-6 flex items-center gap-3">
             <span className="block w-8 h-px bg-[#888880]"></span>
             A note from the founder
           </div>
-          <blockquote className="font-['Playfair_Display'] text-2xl leading-relaxed italic text-[#3A3A36] border-l-2 border-[#0D0D0B] pl-7 mb-6">
+          <blockquote className="font-['Playfair_Display'] text-xl md:text-2xl leading-relaxed italic text-[#3A3A36] border-l-2 border-[#0D0D0B] pl-5 md:pl-7 mb-6">
             &ldquo;I built HYIPE because I&rsquo;ve seen too many incredible Pakistani creators get burned by brands that never paid — and too many brands get let down by influencers who disappeared after payment. There had to be a better way.&rdquo;
           </blockquote>
           <div className="founder-sig flex items-center gap-3.5">
@@ -186,28 +188,28 @@ export default function HomePage() {
         </section>
 
         {/* Transparency Note */}
-        <section className="transparency bg-[#F5F5EF] border-t border-b border-[#E5E5DF] py-12 px-10">
+        <section className="transparency bg-[#F5F5EF] border-t border-b border-[#E5E5DF] py-8 md:py-12 px-4 md:px-10">
           <div className="transparency-inner max-w-[1000px] mx-auto">
-            <h3 className="font-['Playfair_Display'] text-3xl mb-6">How HYIPE Protects You</h3>
-            <p className="text-sm text-[#3A3A36] max-w-[560px] mb-8">
+            <h3 className="font-['Playfair_Display'] text-2xl md:text-3xl mb-4 md:mb-6">How HYIPE Protects You</h3>
+            <p className="text-sm text-[#3A3A36] max-w-[560px] mb-6 md:mb-8">
               We believe in radical transparency. Here&rsquo;s exactly how our escrow system works — no hidden steps, no surprises.
             </p>
-            <div className="transparency-grid grid grid-cols-1 md:grid-cols-3 gap-8 mt-7">
-              <div className="trans-item p-5 bg-white border border-[#E5E5DF] rounded">
+            <div className="transparency-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-8 mt-5 md:mt-7">
+              <div className="trans-item p-4 md:p-5 bg-white border border-[#E5E5DF] rounded">
                 <div className="icon text-xl mb-2.5">→</div>
                 <h4 className="font-medium text-sm uppercase tracking-[0.06em] mb-1.5">Brand Posts Campaign</h4>
                 <p className="text-xs text-[#3A3A36] leading-relaxed">
                   Your campaign is reviewed by our team before going live. We verify the brief and budget before any creator sees it.
                 </p>
               </div>
-              <div className="trans-item p-5 bg-white border border-[#E5E5DF] rounded">
+              <div className="trans-item p-4 md:p-5 bg-white border border-[#E5E5DF] rounded">
                 <div className="icon text-xl mb-2.5">🔒</div>
                 <h4 className="font-medium text-sm uppercase tracking-[0.06em] mb-1.5">Payment Held Securely</h4>
                 <p className="text-xs text-[#3A3A36] leading-relaxed">
                   Once a deal is confirmed, payment is held via our Manual Escrow via EasyPaisa or JazzCash. Creators know the money is there.
                 </p>
               </div>
-              <div className="trans-item p-5 bg-white border border-[#E5E5DF] rounded">
+              <div className="trans-item p-4 md:p-5 bg-white border border-[#E5E5DF] rounded">
                 <div className="icon text-xl mb-2.5">✓</div>
                 <h4 className="font-medium text-sm uppercase tracking-[0.06em] mb-1.5">Delivered & Released</h4>
                 <p className="text-xs text-[#3A3A36] leading-relaxed">
@@ -219,7 +221,7 @@ export default function HomePage() {
         </section>
 
         {/* Footer */}
-        <footer className="hp-footer bg-[#0D0D0B] text-white px-10 py-12 grid grid-cols-1 md:grid-cols-4 gap-10">
+        <footer className="hp-footer bg-[#0D0D0B] text-white px-4 md:px-10 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 md:gap-10">
           <div>
             <div className="footer-brand font-['Playfair_Display'] text-3xl font-bold mb-3">
               <Link href="/" className="flex items-center h-full">
@@ -267,7 +269,7 @@ export default function HomePage() {
             </ul>
           </div>
         </footer>
-        <div className="footer-bottom bg-[#0D0D0B] border-t border-white/10 px-10 py-4 flex justify-between text-[11px] text-white/30">
+        <div className="footer-bottom bg-[#0D0D0B] border-t border-white/10 px-4 md:px-10 py-4 flex flex-col sm:flex-row justify-between text-[11px] text-white/30 gap-2">
           <span>© 2025 HYIPE. All rights reserved.</span>
           <span>Built with ♥ in Pakistan</span>
         </div>

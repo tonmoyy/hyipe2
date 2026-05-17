@@ -14,18 +14,27 @@ interface Creator {
   avatar?: string;
 }
 
+// Add import at the top of page.tsx
+import { headers } from 'next/headers';
+
+// Replace getFeaturedCreators with this version
 async function getFeaturedCreators(): Promise<Creator[]> {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+  // Dynamically get the current host from the request headers
+  const headersList = headers();
+  const host = headersList.get('x-forwarded-host') || headersList.get('host') || 'localhost:3000';
+  const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
+  const baseUrl = `${protocol}://${host}`;
 
-  const res = await fetch(`${baseUrl}/api/creators/featured`, {
-    next: { revalidate: 60 },
-  });
-
-  if (!res.ok) {
-    console.error('Failed to fetch featured creators');
-    return [];
+  try {
+    const res = await fetch(`${baseUrl}/api/creators/featured`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch (error) {
+    console.error('Fetch failed:', error);
+    return []; // Don't crash the page if API is down
   }
-  return res.json();
 }
 
 export default async function HomePage() {

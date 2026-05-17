@@ -3,12 +3,49 @@ import Link from 'next/link';
 import ComingSoonBanner from "@/components/ComingSoonBanner";
 import Image from "next/image";
 
-export default function HomePage() {
+// Shape of a creator returned by the API – platforms can be a string or an array
+interface Creator {
+  id: string;
+  full_name: string;
+  niche: string;
+  followers: string;
+  engagement: string;
+  platforms: string | string[];      // allow both for API flexibility
+  avatar?: string;
+}
+
+async function getFeaturedCreators(): Promise<Creator[]> {
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+
+  const res = await fetch(`${baseUrl}/api/creators/featured`, {
+    next: { revalidate: 60 },
+  });
+
+  if (!res.ok) {
+    console.error('Failed to fetch featured creators');
+    return [];
+  }
+  return res.json();
+}
+
+export default async function HomePage() {
+  const creators = await getFeaturedCreators();
+
+  // Normalize platforms to always be an array of strings
+  const safeCreators = creators.map((c) => ({
+    ...c,
+    platforms: Array.isArray(c.platforms)
+        ? c.platforms
+        : typeof c.platforms === 'string'
+            ? c.platforms.split(',').map((p: string) => p.trim())
+            : [],
+  }));
+
   return (
       <div className="bg-[#FAFAF7]">
         <ComingSoonBanner />
 
-        {/* Hero */}
+        {/* Hero – unchanged */}
         <section className="hp-hero max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-15 px-4 md:px-10 py-12 md:py-20">
           <div>
             <p className="hp-hero-tag font-cinzel font-bold tracking-[0.15em] uppercase text-sm md:text-base">
@@ -44,9 +81,9 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Brand Marquee */}
+        {/* Brand Marquee – unchanged */}
         <div className="marquee-strip border-t border-b border-[#E5E5DF] py-4 overflow-hidden bg-white">
-          <div className="marquee-inner whitespace-nowrap">
+          <div className="marquee-inner whitespace-nowrap inline-block animate-marquee">
             <span className="marquee-item">Khaadi</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Dawlance</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Bata Pakistan</span><span className="marquee-sep">·</span>
@@ -57,7 +94,7 @@ export default function HomePage() {
             <span className="marquee-item">Foodpanda</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Alkaram</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Sapphire</span><span className="marquee-sep">·</span>
-            {/* Duplicate for seamless loop */}
+            {/* Duplicate */}
             <span className="marquee-item">Khaadi</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Dawlance</span><span className="marquee-sep">·</span>
             <span className="marquee-item">Bata Pakistan</span><span className="marquee-sep">·</span>
@@ -71,84 +108,64 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Featured Creators */}
+        {/* Featured Creators – DYNAMIC */}
         <section className="hp-section max-w-[1200px] mx-auto px-4 md:px-10 py-12 md:py-20">
           <div className="hp-section-header flex justify-between items-baseline border-b border-[#E5E5DF] pb-4 mb-6 md:mb-10">
             <h2 className="font-['Playfair_Display'] text-3xl md:text-4xl font-normal">Featured Creators</h2>
-            <span className="text-xs text-[#888880] uppercase tracking-[0.08em] hidden sm:inline">Browse all creators →</span>
+            <span className="text-xs text-[#888880] uppercase tracking-[0.08em] hidden sm:inline">
+            Browse all creators →
+          </span>
           </div>
-          <div className="creators-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
-            {/* Creator 1 */}
-            <div className="creator-card border border-[#E5E5DF] rounded overflow-hidden bg-white">
-              <div className="creator-card-img h-44 bg-[#E8E8E2] flex items-center justify-center text-[11px] text-[#888880] uppercase tracking-[0.05em] border-b border-[#E5E5DF]">
-                [ Creator portrait ]
+
+          {safeCreators.length === 0 ? (
+              <p className="text-sm text-[#888880] italic text-center py-10">
+                No featured creators yet. Check back soon!
+              </p>
+          ) : (
+              <div className="creators-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+                {safeCreators.map((creator) => (
+                    <div key={creator.id} className="creator-card border border-[#E5E5DF] rounded overflow-hidden bg-white">
+                      <div className="creator-card-img h-44 bg-[#E8E8E2] flex items-center justify-center text-[11px] text-[#888880] uppercase tracking-[0.05em] border-b border-[#E5E5DF]">
+                        {creator.avatar ? (
+                            <Image
+                                src={creator.avatar}
+                                alt={creator.full_name || 'Creator portrait'}
+                                width={176}
+                                height={176}
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <span>[ Creator portrait ]</span>
+                        )}
+                      </div>
+                      <div className="creator-card-info p-3.5">
+                        <div className="name font-medium text-sm">{creator.full_name}</div>
+                        <div className="niche text-[11px] text-[#888880] uppercase tracking-[0.08em] mb-2">
+                          {creator.niche}
+                        </div>
+                        <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
+                          <span>{creator.followers}</span>
+                          <span>·</span>
+                          <span>{creator.engagement}</span>
+                        </div>
+                        <div className="mt-2 flex gap-1 flex-wrap">
+                          {creator.platforms.map((platform: string) => (
+                              <span
+                                  key={platform}
+                                  className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]"
+                              >
+                        {platform}
+                      </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                ))}
               </div>
-              <div className="creator-card-info p-3.5">
-                <div className="name font-medium text-sm">Ayesha Noor</div>
-                <div className="niche text-[11px] text-[#888880] uppercase tracking-[0.08em] mb-2">Fashion & Lifestyle</div>
-                <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
-                  <span>280K followers</span><span>·</span><span>4.2% eng.</span>
-                </div>
-                <div className="mt-2 flex gap-1 flex-wrap">
-                  <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">Instagram</span>
-                  <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">TikTok</span>
-                </div>
-              </div>
-            </div>
-            {/* Creator 2 */}
-            <div className="creator-card border border-[#E5E5DF] rounded overflow-hidden bg-white">
-              <div className="creator-card-img h-44 bg-[#E8E8E2] flex items-center justify-center text-[11px] text-[#888880] uppercase tracking-[0.05em] border-b border-[#E5E5DF]">
-                [ Creator portrait ]
-              </div>
-              <div className="creator-card-info p-3.5">
-                <div className="name font-medium text-sm">Bilal Chaudhry</div>
-                <div className="niche text-[11px] text-[#888880] uppercase tracking-[0.08em] mb-2">Tech & Gaming</div>
-                <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
-                  <span>520K followers</span><span>·</span><span>3.8% eng.</span>
-                </div>
-                <div className="mt-2 flex gap-1 flex-wrap">
-                  <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">YouTube</span>
-                  <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">Instagram</span>
-                </div>
-              </div>
-            </div>
-            {/* Creator 3 */}
-            <div className="creator-card border border-[#E5E5DF] rounded overflow-hidden bg-white">
-              <div className="creator-card-img h-44 bg-[#E8E8E2] flex items-center justify-center text-[11px] text-[#888880] uppercase tracking-[0.05em] border-b border-[#E5E5DF]">
-                [ Creator portrait ]
-              </div>
-              <div className="creator-card-info p-3.5">
-                <div className="name font-medium text-sm">Sara Baig</div>
-                <div className="niche text-[11px] text-[#888880] uppercase tracking-[0.08em] mb-2">Food & Travel</div>
-                <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
-                  <span>190K followers</span><span>·</span><span>5.1% eng.</span>
-                </div>
-                <div className="mt-2 flex gap-1 flex-wrap">
-                  <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">Instagram</span>
-                </div>
-              </div>
-            </div>
-            {/* Creator 4 */}
-            <div className="creator-card border border-[#E5E5DF] rounded overflow-hidden bg-white">
-              <div className="creator-card-img h-44 bg-[#E8E8E2] flex items-center justify-center text-[11px] text-[#888880] uppercase tracking-[0.05em] border-b border-[#E5E5DF]">
-                [ Creator portrait ]
-              </div>
-              <div className="creator-card-info p-3.5">
-                <div className="name font-medium text-sm">Hassan Mirza</div>
-                <div className="niche text-[11px] text-[#888880] uppercase tracking-[0.08em] mb-2">Fitness & Health</div>
-                <div className="stats flex gap-3 text-[11px] text-[#3A3A36]">
-                  <span>145K followers</span><span>·</span><span>6.2% eng.</span>
-                </div>
-                <div className="mt-2 flex gap-1 flex-wrap">
-                  <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">YouTube</span>
-                  <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase tracking-[0.06em]">TikTok</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          )}
         </section>
 
-        {/* CTA Box */}
+        {/* CTA Box – unchanged */}
         <section className="px-4 md:px-10 py-12 md:py-20">
           <div className="cta-box bg-[#0D0D0B] text-white rounded p-8 md:p-16 flex flex-col md:flex-row items-center justify-between gap-6 max-w-[1120px] mx-auto">
             <h2 className="font-['Playfair_Display'] text-3xl md:text-5xl leading-tight max-w-[500px] text-center md:text-left">
@@ -166,7 +183,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Founder Note */}
+        {/* Founder Note – unchanged */}
         <section className="founder-section max-w-[800px] mx-auto my-12 md:my-16 px-4 md:px-10">
           <div className="founder-tag text-[11px] tracking-[0.12em] uppercase text-[#888880] mb-6 flex items-center gap-3">
             <span className="block w-8 h-px bg-[#888880]"></span>
@@ -187,7 +204,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Transparency Note */}
+        {/* Transparency Note – unchanged */}
         <section className="transparency bg-[#F5F5EF] border-t border-b border-[#E5E5DF] py-8 md:py-12 px-4 md:px-10">
           <div className="transparency-inner max-w-[1000px] mx-auto">
             <h3 className="font-['Playfair_Display'] text-2xl md:text-3xl mb-4 md:mb-6">How HYIPE Protects You</h3>
@@ -220,7 +237,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Footer */}
+        {/* Footer – unchanged */}
         <footer className="hp-footer bg-[#0D0D0B] text-white px-4 md:px-10 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 md:gap-10">
           <div>
             <div className="footer-brand font-['Playfair_Display'] text-3xl font-bold mb-3">
@@ -273,6 +290,27 @@ export default function HomePage() {
           <span>© 2025 HYIPE. All rights reserved.</span>
           <span>Built with ♥ in Pakistan</span>
         </div>
+
+        {/* Marquee animation style */}
+        <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .animate-marquee {
+          animation: marquee 30s linear infinite;
+        }
+        .marquee-item {
+          display: inline-block;
+          margin-right: 1rem;
+          font-weight: 500;
+        }
+        .marquee-sep {
+          display: inline-block;
+          margin-right: 1rem;
+          opacity: 0.4;
+        }
+      `}</style>
       </div>
   );
 }

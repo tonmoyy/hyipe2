@@ -219,7 +219,7 @@ function InfluencerDashboardInner() {
     /* ─── Tab Switching ─── */
     const switchTab = useCallback(async (tab: SubView) => {
         setActiveSub(tab);
-        setMobileSidebarOpen(false); // close mobile sidebar on tab switch
+        setMobileSidebarOpen(false);
         if (tab === 'projects') await fetchProjects();
         if (tab === 'inbox') await fetchMessages();
         if (tab === 'contracts') await fetchContracts();
@@ -232,11 +232,60 @@ function InfluencerDashboardInner() {
         }
     }, [tabParam]);
 
+    /* ─── Profile Save (now computes homepage columns) ─── */
     const handleSaveProfile = async () => {
         setSavingProfile(true);
-        await supabase.from('profiles').upsert({ id: user!.id, ...profileForm });
+
+        // Compute the fields expected by the homepage API
+        const niche = profileForm.primary_niche || 'General';
+        const totalFollowers =
+            (profileForm.ig_followers ? parseInt(profileForm.ig_followers, 10) : 0) +
+            (profileForm.tiktok_followers ? parseInt(profileForm.tiktok_followers, 10) : 0) +
+            (profileForm.yt_subscribers ? parseInt(profileForm.yt_subscribers, 10) : 0);
+        const followersText = totalFollowers > 0 ? `${(totalFollowers / 1000).toFixed(0)}K followers` : '0 followers';
+
+        // Engagement – you can later calculate from stats; default placeholder
+        const engagement = '4.5% eng.';
+
+        // Platforms from filled handles
+        const platformsList: string[] = [];
+        if (profileForm.ig_handle) platformsList.push('Instagram');
+        if (profileForm.tiktok_handle) platformsList.push('TikTok');
+        if (profileForm.yt_url) platformsList.push('YouTube');
+        const platforms = platformsList.join(',');
+
+        const updatePayload = {
+            id: user!.id,
+            full_name: profileForm.full_name,
+            display_name: profileForm.display_name,
+            city: profileForm.city,
+            phone: profileForm.phone,
+            bio: profileForm.bio,
+            primary_niche: profileForm.primary_niche,
+            secondary_niche: profileForm.secondary_niche,
+            ig_handle: profileForm.ig_handle,
+            ig_followers: profileForm.ig_followers,
+            tiktok_handle: profileForm.tiktok_handle,
+            tiktok_followers: profileForm.tiktok_followers,
+            yt_url: profileForm.yt_url,
+            yt_subscribers: profileForm.yt_subscribers,
+            rate_ig_post: profileForm.rate_ig_post,
+            rate_video: profileForm.rate_video,
+            avatar_url: profileForm.avatar_url,
+            // Homepage columns
+            niche,
+            followers: followersText,
+            engagement,
+            platforms,
+        };
+
+        const { error } = await supabase.from('profiles').upsert(updatePayload);
         setSavingProfile(false);
-        alert('Profile saved');
+        if (error) {
+            alert('Save failed: ' + error.message);
+        } else {
+            alert('Profile saved');
+        }
     };
 
     const handleThreadRead = useCallback(async (partnerId: string, campaignId: string) => {
@@ -303,6 +352,16 @@ function InfluencerDashboardInner() {
             </div>
         </>
     );
+
+    // ═══ BANNED CHECK – moved after all hooks, before main render ═══
+    if (profile?.status === 'banned') {
+        return (
+            <div className="p-10 text-center">
+                <h1 className="text-2xl font-bold text-red-600">Account Suspended</h1>
+                <p>Your account has been banned. You cannot access the dashboard.</p>
+            </div>
+        );
+    }
 
     return (
         <div className="dashboard-shell flex" style={{ height: 'calc(100vh - 48px)' }}>

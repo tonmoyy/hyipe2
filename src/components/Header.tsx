@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useAuth } from '@/providers/AuthProvider';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabaseClient';
 import { RealtimeChannel, PostgrestError } from '@supabase/supabase-js';
 import { ChatsCircle } from '@phosphor-icons/react';
-import { X } from 'lucide-react';
+import { X, Menu } from 'lucide-react';
 
 type Message = {
     id: string;
@@ -162,27 +163,20 @@ export default function Header() {
 
     return (
         <>
-            {/* ==================== SINGLE HEADER – always dark ==================== */}
             <header className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-between h-12 px-4 md:px-6 bg-[#0D0D0B] text-white text-[11px] tracking-[0.08em] uppercase font-medium">
-
-                {/* ---------- HYIPE LOGO (custom spans, visible on all screens) ---------- */}
-                <Link href="/" className="flex items-center">
-                    <div className="flex flex-col items-start leading-none">
-                        <div className="flex items-end font-bold tracking-[-0.01em] text-[22px]" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                            <span>HY</span>
-                            <span className="relative inline-flex flex-col items-center mx-[1px]">
-                <span className="w-[6px] h-[6px] bg-[#F5B800] rounded-full mb-[1px]"></span>
-                <span className="w-[4.5px] h-[16px] bg-current rounded-sm"></span>
-              </span>
-                            <span>PE</span>
-                        </div>
-                        <span className="text-[8px] uppercase tracking-[0.08em] mt-[4px] text-white/45" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-              Influencer Marketplace
-            </span>
-                    </div>
+                {/* Logo */}
+                <Link href="/" className="flex items-center h-full">
+                    <Image
+                        src="/Layer 3.svg"
+                        alt="HYIPE"
+                        width={0}
+                        height={0}
+                        className="h-8 w-auto"
+                        priority
+                    />
                 </Link>
 
-                {/* ---------- DESKTOP NAVIGATION (hidden on mobile) ---------- */}
+                {/* Desktop Navigation (force visible on md+ screens) */}
                 <nav className="!hidden md:!flex items-center gap-5">
                     <Link href="/marketplace" className="text-white/60 hover:text-white transition-colors">
                         Marketplace
@@ -199,7 +193,7 @@ export default function Header() {
 
                     {user ? (
                         <>
-                            {/* Profile image */}
+                            {/* Profile image instead of text name */}
                             {profile?.avatar_url || profile?.logo_url ? (
                                 <img
                                     src={profile?.avatar_url || profile?.logo_url}
@@ -236,8 +230,8 @@ export default function Header() {
                                         <ChatsCircle className="w-6 h-6" weight="regular" />
                                         {unreadCount > 0 && (
                                             <span className="absolute -top-2 left-1/2 -translate-x-1/2 h-4 min-w-[16px] px-1 text-[9px] font-bold rounded-full flex items-center justify-center bg-blue-100 text-blue-700 border border-blue-200">
-                        {unreadCount > 9 ? '9+' : unreadCount}
-                      </span>
+                                                {unreadCount > 9 ? '9+' : unreadCount}
+                                            </span>
                                         )}
                                     </button>
 
@@ -246,9 +240,9 @@ export default function Header() {
                                             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
                                             <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 z-50">
                                                 <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50 rounded-t-lg">
-                          <span className="font-semibold text-gray-700 text-sm normal-case tracking-normal">
-                            Notifications
-                          </span>
+                                                    <span className="font-semibold text-gray-700 text-sm normal-case tracking-normal">
+                                                        Notifications
+                                                    </span>
                                                     <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
                                                         <X className="w-4 h-4" />
                                                     </button>
@@ -273,11 +267,11 @@ export default function Header() {
                                                                     <span className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1" />
                                                                 </div>
                                                                 <span className="text-xs text-gray-400 mt-1 block normal-case tracking-normal">
-                                  {new Date(m.created_at).toLocaleTimeString([], {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                  })}
-                                </span>
+                                                                    {new Date(m.created_at).toLocaleTimeString([], {
+                                                                        hour: '2-digit',
+                                                                        minute: '2-digit',
+                                                                    })}
+                                                                </span>
                                                             </Link>
                                                         ))
                                                     )}
@@ -317,53 +311,36 @@ export default function Header() {
                     )}
                 </nav>
 
-                {/* ---------- MOBILE RIGHT SIDE (hamburger + login) ---------- */}
-                <div className="flex md:hidden items-center gap-2">
-                    {!user && (
-                        <Link
-                            href="/auth"
-                            className="text-[10px] uppercase tracking-[0.06em] border border-white rounded px-3 py-1"
-                            style={{ color: '#fff', textDecoration: 'none' }}
-                        >
-                            Log in
-                        </Link>
-                    )}
-                    <button
-                        className="w-9 h-9 flex flex-col justify-center items-center gap-[4px] p-1 bg-transparent border-none cursor-pointer"
-                        onClick={() => setMobileMenuOpen(true)}
-                        aria-label="Open menu"
-                    >
-                        <span className="block w-[18px] h-[2px] bg-white rounded-sm"></span>
-                        <span className="block w-[14px] h-[2px] bg-white rounded-sm"></span>
-                        <span className="block w-[18px] h-[2px] bg-white rounded-sm"></span>
-                    </button>
-                </div>
+                {/* Mobile Hamburger Button (visible on small screens only) */}
+                <button
+                    onClick={() => setMobileMenuOpen(true)}
+                    className="md:!hidden text-white"
+                    aria-label="Open menu"
+                >
+                    <Menu className="w-5 h-5" />
+                </button>
             </header>
 
-            {/* ==================== MOBILE MENU OVERLAY (unchanged) ==================== */}
+            {/* Mobile Menu Overlay */}
             {mobileMenuOpen && (
                 <div className="fixed inset-0 z-[200] md:hidden">
+                    {/* Backdrop */}
                     <div
                         className="absolute inset-0 bg-black/50"
                         onClick={closeMobileMenu}
                     />
+                    {/* Menu Panel */}
                     <div className="absolute right-0 top-0 h-full w-64 bg-[#0D0D0B] text-white flex flex-col p-6 shadow-2xl">
                         <div className="flex justify-between items-center mb-8">
-                            {/* Use the same custom logo in the overlay for consistency */}
-                            <Link href="/" onClick={closeMobileMenu} className="flex items-center">
-                                <div className="flex flex-col items-start leading-none">
-                                    <div className="flex items-end font-bold tracking-[-0.01em] text-[22px]" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                                        <span>HY</span>
-                                        <span className="relative inline-flex flex-col items-center mx-[1px]">
-                      <span className="w-[6px] h-[6px] bg-[#F5B800] rounded-full mb-[1px]"></span>
-                      <span className="w-[4.5px] h-[16px] bg-current rounded-sm"></span>
-                    </span>
-                                        <span>PE</span>
-                                    </div>
-                                    <span className="text-[8px] uppercase tracking-[0.08em] mt-[4px] text-white/45" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                    Influencer Marketplace
-                  </span>
-                                </div>
+                            <Link href="/" onClick={closeMobileMenu}>
+                                <Image
+                                    src="/Layer 3.svg"
+                                    alt="HYIPE"
+                                    width={0}
+                                    height={0}
+                                    className="h-8 w-auto"
+                                    priority
+                                />
                             </Link>
                             <button onClick={closeMobileMenu} className="text-white">
                                 <X className="w-5 h-5" />

@@ -31,6 +31,26 @@ async function getFeaturedCreators(): Promise<Creator[]> {
         return [];
     }
 }
+const trustItems = [
+    {
+        icon: "🔒",
+        title: "Escrow Protection",
+        description:
+            "Brand payment is locked in escrow before any work begins. You always get paid.",
+    },
+    {
+        icon: "✓",
+        title: "Verified Brands",
+        description:
+            "Every brand is verified with NTN and contact details before going live.",
+    },
+    {
+        icon: "📲",
+        title: "EasyPaisa / JazzCash",
+        description:
+            "Payouts via Pakistan's most popular mobile wallets. Fast, local, reliable.",
+    },
+];
 
 export default async function HomePage() {
     const creators = await getFeaturedCreators();
@@ -217,18 +237,49 @@ export default async function HomePage() {
 
             {/* CTA Box */}
             <section className="px-4 md:px-10 py-12 md:py-20">
-                <div className="cta-box bg-[#0D0D0B] text-white rounded p-8 md:p-16 flex flex-col md:flex-row items-center justify-between gap-6 max-w-[1120px] mx-auto">
-                    <h2 className="font-['Playfair_Display'] text-3xl md:text-5xl leading-tight max-w-[500px] text-center md:text-left">
-                        Ready to run<br />your first <em className="text-white/50 italic">campaign?</em>
+                {/* Single container – stacks vertically on all screens, centered on desktop */}
+                <div className="bg-[#0D0D0B] text-white rounded p-8 md:p-16 flex flex-col items-center max-w-[1120px] mx-auto">
+                    {/* Heading – centered on all screens */}
+                    <h2 className="text-3xl md:text-5xl md:font-['Playfair_Display'] leading-tight text-center mb-4 md:mb-6">
+                        Ready to grow{" "}
+                        <em className="not-italic text-lime-400 md:text-white/50 md:italic">
+                            together?
+                        </em>
                     </h2>
-                    <div className="cta-box-right flex flex-col gap-3 items-center md:items-end">
-                        <div className="text-xs text-white/40 text-center md:text-right mb-2">Trusted by 200+ brands across Pakistan</div>
-                        <Link href="/auth" className="btn-lime bg-[#C8F04A] text-[#0D0D0B] px-6 py-2.5 md:px-7 md:py-3 text-xs font-medium uppercase tracking-[0.08em]">
+
+                    {/* Description – visible on all screens, centered */}
+                    <p className="text-white/70 text-center max-w-sm md:max-w-2xl mx-auto mb-6 leading-relaxed text-sm md:text-base">
+                        Join Pakistan&#39;s most trusted influencer marketplace. Start
+                        collaborating with brands and creators today.
+                    </p>
+
+                    {/* Trust badge – desktop only, centered */}
+                    <div className="hidden md:block text-xs text-white/40 text-center mb-6">
+                        Trusted by 200+ brands across Pakistan
+                    </div>
+
+                    {/* Buttons container – stacked on mobile, side-by-side on desktop */}
+                    <div className="flex flex-col md:flex-row gap-3 items-center mt-2">
+                        <Link
+                            href="/auth"
+                            className="w-full max-w-xs px-6 py-3.5 bg-[#C8F04A] text-[#0D0D0B] font-semibold rounded-full
+                       hover:bg-lime-300 transition text-center
+                       md:w-auto md:max-w-none md:px-7 md:py-3 md:text-xs md:font-medium
+                       md:uppercase md:tracking-[0.08em] md:rounded-sm"
+                        >
                             Post a Campaign →
                         </Link>
-                        <button className="bg-transparent border-none text-white/50 text-xs cursor-pointer mt-1">
-                            Apply as a Creator instead
-                        </button>
+
+                        <Link
+                            href="/marketplace"
+                            className="w-full max-w-xs px-6 py-3.5 bg-transparent text-white font-semibold rounded-full
+                       border-2 border-white/30 hover:border-white/60 transition text-center
+                       md:w-auto md:max-w-none md:px-7 md:py-3 md:text-xs md:font-medium
+                       md:uppercase md:tracking-[0.08em] md:rounded-sm md:text-white/90
+                       md:hover:bg-white/5"
+                        >
+                            Browse Campaigns →
+                        </Link>
                     </div>
                 </div>
             </section>
@@ -257,41 +308,42 @@ export default async function HomePage() {
             {/* Transparency Note */}
             <section className="transparency bg-[#F5F5EF] border-t border-b border-[#E5E5DF] py-8 md:py-12 px-4 md:px-10">
                 <div className="transparency-inner max-w-[1000px] mx-auto">
-                    <h3 className="font-['Playfair_Display'] text-2xl md:text-3xl mb-4 md:mb-6">How HYIPE Protects You</h3>
-                    <p className="text-sm text-[#3A3A36] max-w-[560px] mb-6 md:mb-8">
-                        We believe in radical transparency. Here&rsquo;s exactly how our escrow system works — no hidden steps, no surprises.
-                    </p>
-                    <div className="transparency-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-8 mt-5 md:mt-7">
-                        <div className="trans-item p-4 md:p-5 bg-white border border-[#E5E5DF] rounded">
-                            <div className="icon text-xl mb-2.5">→</div>
-                            <h4 className="font-medium text-sm uppercase tracking-[0.06em] mb-1.5">Brand Posts Campaign</h4>
-                            <p className="text-xs text-[#3A3A36] leading-relaxed">
-                                Your campaign is reviewed by our team before going live. We verify the brief and budget before any creator sees it.
-                            </p>
-                        </div>
-                        <div className="trans-item p-4 md:p-5 bg-white border border-[#E5E5DF] rounded">
-                            <div className="icon text-xl mb-2.5">🔒</div>
-                            <h4 className="font-medium text-sm uppercase tracking-[0.06em] mb-1.5">Payment Held Securely</h4>
-                            <p className="text-xs text-[#3A3A36] leading-relaxed">
-                                Once a deal is confirmed, payment is held via our Manual Escrow via EasyPaisa or JazzCash. Creators know the money is there.
-                            </p>
-                        </div>
-                        <div className="trans-item p-4 md:p-5 bg-white border border-[#E5E5DF] rounded">
-                            <div className="icon text-xl mb-2.5">✓</div>
-                            <h4 className="font-medium text-sm uppercase tracking-[0.06em] mb-1.5">Delivered & Released</h4>
-                            <p className="text-xs text-[#3A3A36] leading-relaxed">
-                                After content is approved and deliverables confirmed, we release payment directly to the creator. Zero risk for both sides.
-                            </p>
-                        </div>
+                    {/* Heading – same across all screens */}
+                    <h3 className="font-['Playfair_Display'] text-2xl md:text-3xl mb-4 md:mb-6">
+                        Why creators trust us
+                    </h3>
+
+                    {/*
+          MOBILE: simple vertical list (mob-trust, mob-trust-item)
+          DESKTOP: 3-column card grid (adds gap, padding, background, border)
+        */}
+                    <div className="mob-trust grid grid-cols-1 md:grid-cols-3 md:gap-8">
+                        {trustItems.map((item, index) => (
+                            <div
+                                key={index}
+                                className="mob-trust-item md:p-5 md:bg-white md:border md:border-[#E5E5DF] md:rounded"
+                            >
+                                <div className="icon text-xl mb-2.5">{item.icon}</div>
+                                <h4 className="font-medium text-sm uppercase tracking-[0.06em] mb-1.5">
+                                    {item.title}
+                                </h4>
+                                <p className="text-xs text-[#3A3A36] leading-relaxed">
+                                    {item.description}
+                                </p>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </section>
 
             {/* Footer */}
-            <footer className="hp-footer bg-[#0D0D0B] text-white px-4 md:px-10 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 md:gap-10">
-                <div>
-                    <div className="footer-brand font-['Playfair_Display'] text-3xl font-bold mb-3">
-                        <Link href="/" className="flex items-center h-full">
+            <footer className="bg-[#0D0D0B] text-white">
+                <div className="px-4 md:px-10 py-8 md:py-12">
+
+                    {/* Mobile Layout */}
+                    <div className="md:hidden">
+                        {/* Logo */}
+                        <Link href="/" className="inline-flex items-center mb-4">
                             <Image
                                 src="/Layer 3.svg"
                                 alt="HYIPE"
@@ -301,47 +353,133 @@ export default async function HomePage() {
                                 priority
                             />
                         </Link>
+
+                        <p className="text-sm text-white/60 mb-8">
+                            Pakistan&apos;s first escrow-backed influencer marketplace.
+                        </p>
+
+                        {/* Platform */}
+                        <div className="mb-6">
+                            <h4 className="text-xs uppercase tracking-[0.12em] text-white/40 mb-3">
+                                Platform
+                            </h4>
+
+                            <div className="flex flex-wrap gap-x-5 gap-y-2">
+                                <a href="#" className="text-sm text-white/70">Marketplace</a>
+                                <a href="#" className="text-sm text-white/70">How it Works</a>
+                                <a href="#" className="text-sm text-white/70">For Brands</a>
+                                <a href="#" className="text-sm text-white/70">For Creators</a>
+                            </div>
+                        </div>
+
+                        {/* Company */}
+                        <div className="mb-6">
+                            <h4 className="text-xs uppercase tracking-[0.12em] text-white/40 mb-3">
+                                Company
+                            </h4>
+
+                            <div className="flex flex-wrap gap-x-5 gap-y-2">
+                                <a href="#" className="text-sm text-white/70">About</a>
+                                <a href="#" className="text-sm text-white/70">Blog</a>
+                                <a href="#" className="text-sm text-white/70">Careers</a>
+                                <a href="#" className="text-sm text-white/70">Contact</a>
+                            </div>
+                        </div>
+
+                        {/* Legal */}
+                        <div className="mb-8">
+                            <h4 className="text-xs uppercase tracking-[0.12em] text-white/40 mb-3">
+                                Legal
+                            </h4>
+
+                            <div className="flex flex-wrap gap-x-5 gap-y-2">
+                                <a href="#" className="text-sm text-white/70">Privacy Policy</a>
+                                <a href="#" className="text-sm text-white/70">Terms of Service</a>
+                                <a href="#" className="text-sm text-white/70">Escrow Policy</a>
+                            </div>
+                        </div>
+
+                        <div className="border-t border-white/10 pt-4">
+                            <div className="flex items-center justify-between text-[11px] text-white/30">
+                                <span>© 2025 HYIPE. All rights reserved.</span>
+                                <span>🇵🇰 Pakistan</span>
+                            </div>
+                        </div>
                     </div>
-                    <div className="footer-sub text-xs text-white/40 leading-relaxed mb-5">
-                        Pakistan&rsquo;s first creator marketplace.<br />Secure. Transparent. Proudly Pakistani.
+
+                    {/* Desktop Layout */}
+                    <div className="hidden md:grid grid-cols-4 gap-10">
+                        <div>
+                            <Link href="/" className="flex items-center mb-3">
+                                <Image
+                                    src="/Layer 3.svg"
+                                    alt="HYIPE"
+                                    width={0}
+                                    height={0}
+                                    className="h-8 w-auto"
+                                    priority
+                                />
+                            </Link>
+
+                            <p className="text-xs text-white/40 leading-relaxed mb-5">
+                                Pakistan&apos;s first escrow-backed influencer marketplace.
+                            </p>
+
+                            <div className="text-[11px] text-white/30">
+                                www.thehyipe.com
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-3.5">
+                                Platform
+                            </h4>
+
+                            <ul className="space-y-2">
+                                <li><a href="#" className="text-white/70 text-sm">Marketplace</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">How it Works</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">For Brands</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">For Creators</a></li>
+                            </ul>
+                        </div>
+
+                        <div>
+                            <h4 className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-3.5">
+                                Company
+                            </h4>
+
+                            <ul className="space-y-2">
+                                <li><a href="#" className="text-white/70 text-sm">About</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">Blog</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">Careers</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">Contact</a></li>
+                            </ul>
+                        </div>
+
+                        <div>
+                            <h4 className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-3.5">
+                                Legal
+                            </h4>
+
+                            <ul className="space-y-2">
+                                <li><a href="#" className="text-white/70 text-sm">Privacy Policy</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">Terms of Service</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">Escrow Policy</a></li>
+                                <li><a href="#" className="text-white/70 text-sm">Refund Policy</a></li>
+                            </ul>
+                        </div>
                     </div>
-                    <div className="text-[11px] text-white/30">www.thehyipe.com</div>
                 </div>
-                <div className="footer-col">
-                    <h4 className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-3.5">Platform</h4>
-                    <ul className="flex flex-col gap-2 list-none">
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Marketplace</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">How it Works</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Pricing</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">For Brands</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">For Creators</a></li>
-                    </ul>
-                </div>
-                <div className="footer-col">
-                    <h4 className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-3.5">Company</h4>
-                    <ul className="flex flex-col gap-2 list-none">
-                        <li><a href="#" className="text-white/70 text-sm no-underline">About</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Blog</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Careers</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Contact</a></li>
-                    </ul>
-                </div>
-                <div className="footer-col">
-                    <h4 className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-3.5">Legal</h4>
-                    <ul className="flex flex-col gap-2 list-none">
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Privacy Policy</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Terms of Service</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Escrow Policy</a></li>
-                        <li><a href="#" className="text-white/70 text-sm no-underline">Refund Policy</a></li>
-                    </ul>
+
+                {/* Desktop Bottom Bar */}
+                <div className="hidden md:flex border-t border-white/10 px-10 py-4 justify-between text-[11px] text-white/30">
+                    <span>© 2025 HYIPE. All rights reserved.</span>
+                    <span>🇵🇰 Pakistan</span>
                 </div>
             </footer>
-            <div className="footer-bottom bg-[#0D0D0B] border-t border-white/10 px-4 md:px-10 py-4 flex flex-col sm:flex-row justify-between text-[11px] text-white/30 gap-2 text-center sm:text-left">
-                <span>© 2025 HYIPE. All rights reserved.</span>
-                <span>Built with ♥ in Pakistan</span>
-            </div>
 
-            <style>{`
+
+                <style>{`
                 @keyframes marquee {
                   0% { transform: translateX(0); }
                   100% { transform: translateX(-50%); }

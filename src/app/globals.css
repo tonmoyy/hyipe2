@@ -1876,8 +1876,8 @@ body {
 .text-sm {
   font-size: 12px;
 }
-.hidden {
-  display: none !important;
+.hidden-legacy {
+  display: none;
 }
 .screen-fade {
   animation: fadeIn 0.2s ease;

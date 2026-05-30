@@ -135,8 +135,7 @@ export default function AuthPage() {
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 min-h-screen">
-
-            {/* LEFT PANEL */}
+            {/* LEFT PANEL (desktop only) */}
             <div className="hidden md:flex bg-[#0D0D0B] text-white px-10 lg:px-16 py-12 flex-col justify-between">
                 <div>
                     <div className="font-['Playfair_Display'] text-3xl lg:text-4xl font-bold mb-2">
@@ -158,11 +157,57 @@ export default function AuthPage() {
 
             {/* RIGHT PANEL */}
             <div className="bg-[#FAFAF7] px-5 sm:px-10 md:px-14 lg:px-16 py-10 md:py-16 flex items-center justify-center">
-
                 <div className="w-full max-w-[420px]">
+                    {/* MOBILE HEADER (visible only on small screens) */}
+                    <div className="md:hidden bg-[#0D0D0B] text-white -mx-5 sm:-mx-10 px-5 sm:px-10 pt-6 pb-8 mb-8">
+                        <button
+                            onClick={() => router.push('/')}
+                            className="text-white/80 text-sm mb-5 inline-block hover:text-white transition-colors"
+                        >
+                            ← Back to site
+                        </button>
 
-                    {/* HEADER */}
-                    <h2 className="font-['Playfair_Display'] text-2xl sm:text-3xl font-bold mb-2">
+                        {/* HYIPE LOGO white on dark */}
+                        <div className="hyipe-logo logo-md" style={{ color: 'white', marginBottom: '12px' }}>
+                            <div className="wordmark" style={{ display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>
+                                <span className="hy">HY</span>
+                                <span className="i-wrap" style={{ display: 'inline-block', margin: '0 2px' }}>
+                                    <span
+                                        className="i-dot"
+                                        style={{
+                                            display: 'block',
+                                            width: '5px',
+                                            height: '5px',
+                                            borderRadius: '50%',
+                                            background: 'white',
+                                            margin: '0 auto 2px',
+                                        }}
+                                    ></span>
+                                    <span
+                                        className="i-stem"
+                                        style={{
+                                            display: 'block',
+                                            width: '2px',
+                                            height: '18px',
+                                            background: 'white',
+                                            margin: '0 auto',
+                                        }}
+                                    ></span>
+                                </span>
+                                <span className="pe">PE</span>
+                            </div>
+                            <div className="tagline" style={{ color: 'rgba(255,255,255,.4)', fontSize: '13px' }}>
+                                Influencer Marketplace
+                            </div>
+                        </div>
+
+                        <p style={{ fontSize: '13px', color: 'rgba(255,255,255,.45)', marginTop: '4px', lineHeight: 1.55 }}>
+                            Pakistan&apos;s creator marketplace. Escrow-protected · EasyPaisa / JazzCash · Verified brands
+                        </p>
+                    </div>
+
+                    {/* DESKTOP HEADING (hidden on mobile) */}
+                    <h2 className="hidden md:block font-['Playfair_Display'] text-2xl sm:text-3xl font-bold mb-2">
                         Join HYIPE
                     </h2>
                     <p className="text-xs sm:text-sm text-[#888880] mb-6 sm:mb-8">
@@ -204,7 +249,6 @@ export default function AuthPage() {
                     {/* SIGNUP */}
                     {tab === 'signup' && (
                         <form onSubmit={handleSignUp} className="space-y-4">
-
                             <div className="flex gap-2 flex-wrap mb-2">
                                 {['influencer', 'brand'].map((r) => (
                                     <button
@@ -258,7 +302,6 @@ export default function AuthPage() {
                     {/* LOGIN */}
                     {tab === 'login' && (
                         <form onSubmit={handleLogin} className="space-y-4">
-
                             <input
                                 className="w-full p-3 border text-sm"
                                 placeholder="Email"

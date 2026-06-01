@@ -143,31 +143,72 @@ function InfluencerDashboardInner() {
     const fetchMessages = useCallback(async () => {
         if (!user) return;
         setLoadingMessages(true);
+        try {
+            // Fetch threads without any joins
+            const { data: threadsData, error: threadsError } = await supabase
+                .from('conversation_threads')
+                .select('id, campaign_id, brand_id, last_message, last_message_at, created_at')
+                .eq('influencer_id', user.id)
+                .eq('started_by_brand', true)
+                .order('last_message_at', { ascending: false });
 
-        const { data } = await supabase
-            .from('conversation_threads')
-            .select(`
-                *,
-                campaign:campaigns(title),
-                brand:profiles!conversation_threads_brand_id_fkey(full_name)
-            `)
-            .eq('influencer_id', user.id)
-            .eq('started_by_brand', true)
-            .order('last_message_at', { ascending: false });
+            if (threadsError) {
+                console.error('Error fetching threads:', threadsError);
+                setLoadingMessages(false);
+                return;
+            }
 
-        const mappedThreads: Thread[] = (data || []).map(thread => ({
-            id: thread.id,
-            partner_id: thread.brand_id,
-            partner_name: thread.brand?.full_name || 'Brand',
-            campaign_id: thread.campaign_id,
-            campaign_title: thread.campaign?.title || 'Campaign',
-            last_message: thread.last_message || '',
-            last_at: thread.last_message_at || thread.created_at,
-            unread: false,
-        }));
+            if (!threadsData || threadsData.length === 0) {
+                setThreads([]);
+                setLoadingMessages(false);
+                return;
+            }
 
-        setThreads(mappedThreads);
-        setLoadingMessages(false);
+            // Collect unique brand IDs and campaign IDs (filter out nulls)
+            const brandIds = [...new Set(threadsData.map(t => t.brand_id).filter(Boolean))];
+            const campaignIds = [...new Set(threadsData.map(t => t.campaign_id).filter(Boolean))];
+
+            // Fetch brand names and campaign titles separately
+            let brandsData: { id: string; full_name: string }[] = [];
+            if (brandIds.length > 0) {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('id, full_name')
+                    .in('id', brandIds);
+                if (error) console.error('Error fetching brand profiles:', error);
+                brandsData = data ?? [];
+            }
+
+            let campaignsData: { id: string; title: string }[] = [];
+            if (campaignIds.length > 0) {
+                const { data, error } = await supabase
+                    .from('campaigns')
+                    .select('id, title')
+                    .in('id', campaignIds);
+                if (error) console.error('Error fetching campaigns:', error);
+                campaignsData = data ?? [];
+            }
+
+            const brandMap = new Map(brandsData.map(b => [b.id, b.full_name]));
+            const campaignMap = new Map(campaignsData.map(c => [c.id, c.title]));
+
+            const mapped: Thread[] = threadsData.map(t => ({
+                id: t.id,
+                partner_id: t.brand_id,
+                partner_name: brandMap.get(t.brand_id) ?? 'Brand',
+                campaign_id: t.campaign_id,
+                campaign_title: campaignMap.get(t.campaign_id) ?? 'Campaign',
+                last_message: t.last_message || '',
+                last_at: t.last_message_at || t.created_at,
+                unread: false,
+            }));
+
+            setThreads(mapped);
+        } catch (err) {
+            console.error('Unexpected error in fetchMessages:', err);
+        } finally {
+            setLoadingMessages(false);
+        }
     }, [user, supabase]);
 
     const fetchContracts = useCallback(async () => {
@@ -846,7 +887,7 @@ function InboxSection({
 
         let query = supabase
             .from('messages')
-            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id, sender:profiles!messages_sender_id_fkey(full_name)')
+            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id')
             .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${thread.partner_id}),and(sender_id.eq.${thread.partner_id},receiver_id.eq.${currentUserId})`)
             .order('created_at', { ascending: true });
 
@@ -854,27 +895,58 @@ function InboxSection({
             query = query.eq('campaign_id', thread.campaign_id);
         }
 
-        const { data, error } = await query;
-        if (error) { setConversationLoading(false); return; }
+        try {
+            const { data: messagesData, error } = await query;
+            if (error) {
+                console.error('Error loading messages:', error);
+                setConversationLoading(false);
+                return;
+            }
 
-        const rows = (data ?? []) as unknown as (Message & { sender: { full_name: string } | { full_name: string }[] | null })[];
-        const msgs: Message[] = rows.map(row => ({
-            id: row.id,
-            sender_id: row.sender_id,
-            receiver_id: row.receiver_id,
-            content: row.content,
-            created_at: row.created_at,
-            read: row.read,
-            campaign_id: row.campaign_id,
-            sender_full_name:
-                (Array.isArray(row.sender) ? row.sender[0]?.full_name : row.sender?.full_name) ||
-                (row.sender_id === thread.partner_id ? thread.partner_name : 'You'),
-        }));
-        setConversation(msgs);
-        setConversationLoading(false);
-        await onThreadRead(thread.partner_id, thread.campaign_id);
-        setTimeout(scrollToBottom, 50);
-        setTimeout(() => inputRef.current?.focus(), 100);
+            if (!messagesData || messagesData.length === 0) {
+                setConversation([]);
+                setConversationLoading(false);
+                return;
+            }
+
+            // Collect unique sender IDs (except current user)
+            const senderIds = [...new Set(messagesData.map(m => m.sender_id).filter(id => id !== currentUserId))];
+
+            // Fetch sender profiles manually
+            const senderMap = new Map<string, string>();
+            if (senderIds.length > 0) {
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, full_name')
+                    .in('id', senderIds);
+                if (profiles) {
+                    profiles.forEach(p => senderMap.set(p.id, p.full_name));
+                }
+            }
+
+            const msgs: Message[] = messagesData.map(m => ({
+                id: m.id,
+                sender_id: m.sender_id,
+                receiver_id: m.receiver_id,
+                content: m.content,
+                created_at: m.created_at,
+                read: m.read,
+                campaign_id: m.campaign_id,
+                sender_full_name:
+                    m.sender_id === currentUserId
+                        ? 'You'
+                        : senderMap.get(m.sender_id) ?? thread.partner_name,
+            }));
+
+            setConversation(msgs);
+            await onThreadRead(thread.partner_id, thread.campaign_id);
+            setTimeout(scrollToBottom, 50);
+            setTimeout(() => inputRef.current?.focus(), 100);
+        } catch (err) {
+            console.error('Unexpected error in loadConversation:', err);
+        } finally {
+            setConversationLoading(false);
+        }
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
     // Auto‑open thread from URL params

@@ -1066,7 +1066,7 @@ function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: Cam
     );
 }
 
-/* ─── Admin Inbox Section ─── */
+/* ─── Admin Inbox Section (with mobile toggle) ─── */
 function AdminInboxSection({
                                threads,
                                loading,
@@ -1080,6 +1080,8 @@ function AdminInboxSection({
                                onSendReply,
                            }: AdminInboxProps) {
     const [replyText, setReplyText] = useState('');
+    const [showMobileChat, setShowMobileChat] = useState(false);
+
     const canSend = selectedThread &&
         (selectedThread.brand_id === currentUserId || selectedThread.influencer_id === currentUserId);
 
@@ -1087,6 +1089,16 @@ function AdminInboxSection({
         if (!selectedThread || !replyText.trim()) return;
         onSendReply(selectedThread.id, replyText.trim());
         setReplyText('');
+    };
+
+    const handleThreadSelect = (thread: AdminThread) => {
+        loadConversation(thread);
+        setShowMobileChat(true);
+    };
+
+    const handleBackToList = () => {
+        setShowMobileChat(false);
+        setSelectedThread(null);
     };
 
     const headerTitle = selectedThread
@@ -1110,9 +1122,10 @@ function AdminInboxSection({
                 🔒 Admin view. All conversations are visible. You can reply to threads where you are a participant.
             </div>
 
-            <div className="inbox-layout grid grid-cols-1 md:grid-cols-[300px_1fr] h-[calc(100vh-220px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+            {/* Desktop layout (unchanged) */}
+            <div className="hidden md:grid grid-cols-[300px_1fr] h-[calc(100vh-220px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
                 {/* Thread List – hidden on mobile, visible on md+ */}
-                <div className="inbox-list border-r border-[#E5E5DF] overflow-y-auto hidden md:block">
+                <div className="inbox-list border-r border-[#E5E5DF] overflow-y-auto">
                     <div className="inbox-list-header px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium">
                         All Threads ({threads.length})
                     </div>
@@ -1152,7 +1165,7 @@ function AdminInboxSection({
                     )}
                 </div>
 
-                {/* Chat Pane */}
+                {/* Chat Pane – always visible on desktop */}
                 <div className="chat-pane flex flex-col min-h-0">
                     {selectedThread ? (
                         <>
@@ -1235,6 +1248,140 @@ function AdminInboxSection({
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* Mobile layout – visible only on small screens */}
+            <div className="block md:hidden">
+                {!showMobileChat ? (
+                    /* Thread list on mobile */
+                    <div className="bg-white border border-[#E5E5DF] rounded overflow-hidden">
+                        <div className="px-4 py-3 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium bg-[#F6F6F2]">
+                            All Threads ({threads.length})
+                        </div>
+                        <div className="divide-y divide-[#E5E5DF] max-h-[calc(100vh-340px)] overflow-y-auto">
+                            {loading ? (
+                                <div className="px-4 py-4 text-xs text-[#888880]">Loading...</div>
+                            ) : threads.length === 0 ? (
+                                <div className="px-4 py-4 text-xs text-[#888880]">No conversations yet.</div>
+                            ) : (
+                                threads.map((thread) => (
+                                    <div
+                                        key={thread.id}
+                                        onClick={() => handleThreadSelect(thread)}
+                                        className={`px-4 py-3 cursor-pointer hover:bg-[#F6F6F2] ${
+                                            selectedThread?.id === thread.id ? 'bg-[#F0F0EA]' : ''
+                                        }`}
+                                    >
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-medium truncate">
+                                                    {thread.brand_name} ↔ {thread.influencer_name}
+                                                </div>
+                                                <div className="text-[10px] text-[#5E7A0A] font-medium truncate mt-0.5 uppercase">
+                                                    {thread.campaign_title}
+                                                </div>
+                                                <div className="text-xs text-[#888880] truncate mt-0.5">
+                                                    {thread.last_message}
+                                                </div>
+                                            </div>
+                                            <span className="text-[10px] text-[#888880] ml-2 flex-shrink-0">
+                                                {new Date(thread.last_at).toLocaleDateString()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        <div className="px-4 py-3 bg-[#FFF8E6] border-t border-[#F0D88A] text-xs text-[#7A5200]">
+                            ⚠ Admin view only. Messages are read‑only for moderation purposes.
+                        </div>
+                    </div>
+                ) : (
+                    /* Conversation pane on mobile */
+                    <div className="flex flex-col h-[calc(100vh-260px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+                        {selectedThread ? (
+                            <>
+                                <div className="px-4 py-3 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
+                                    <button
+                                        onClick={handleBackToList}
+                                        className="text-lg leading-none mr-1 text-[#888880] hover:text-[#0D0D0B]"
+                                    >
+                                        ←
+                                    </button>
+                                    <div>
+                                        <div className="text-sm font-semibold">
+                                            {selectedThread.brand_name} ↔ {selectedThread.influencer_name}
+                                        </div>
+                                        {headerTitle && (
+                                            <div className="text-[10px] text-[#5E7A0A] uppercase">{headerTitle}</div>
+                                        )}
+                                        {!headerTitle && (
+                                            <div className="text-[10px] text-[#5E7A0A] uppercase">Direct Chat</div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                                    {conversationLoading ? (
+                                        <div className="text-sm text-[#888880]">Loading...</div>
+                                    ) : conversation.length === 0 ? (
+                                        <div className="text-sm text-[#888880]">No messages in this thread.</div>
+                                    ) : (
+                                        conversation.map((msg) => (
+                                            <div
+                                                key={msg.id}
+                                                className={`max-w-[85%] px-3 py-2.5 rounded text-sm leading-relaxed ${
+                                                    msg.sender_id === selectedThread.brand_id
+                                                        ? 'bg-[#F0F0EA] self-start'
+                                                        : msg.sender_id === selectedThread.influencer_id
+                                                            ? 'bg-[#0D0D0B] text-white self-end'
+                                                            : 'bg-[#EEEEEE] self-start'
+                                                }`}
+                                            >
+                                                <div className="text-[10px] font-medium mb-1 text-[#888880]">
+                                                    {msg.sender_name || 'Unknown'}
+                                                </div>
+                                                {msg.content}
+                                                <div className="text-[10px] mt-1 opacity-50">
+                                                    {new Date(msg.created_at).toLocaleTimeString([], {
+                                                        hour: '2-digit',
+                                                        minute: '2-digit',
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                                {canSend && (
+                                    <div className="border-t border-[#E5E5DF] px-4 py-3 flex gap-2.5 flex-shrink-0 bg-white">
+                                        <input
+                                            value={replyText}
+                                            onChange={(e) => setReplyText(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    handleReply();
+                                                }
+                                            }}
+                                            placeholder="Type a reply..."
+                                            className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none"
+                                        />
+                                        <button
+                                            onClick={handleReply}
+                                            disabled={!replyText.trim()}
+                                            className="bg-[#0D0D0B] text-white px-4 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50"
+                                        >
+                                            Send
+                                        </button>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className="flex-1 flex items-center justify-center text-sm text-[#888880]">
+                                Select a conversation to read
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </>
     );

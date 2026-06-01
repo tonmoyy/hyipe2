@@ -59,12 +59,6 @@ interface RawApplicationRow {
     campaign: { title: string; brand: { full_name: string }[] | { full_name: string } }[] | { title: string; brand: { full_name: string }[] | { full_name: string } };
 }
 
-interface RawMessageRow {
-    id: string; sender_id: string; receiver_id: string; content: string;
-    created_at: string; read: boolean; campaign_id: string | null;
-    sender: { full_name: string } | { full_name: string }[] | null;
-}
-
 interface RawContractRow {
     id: string;
     campaign_id: string;
@@ -113,9 +107,6 @@ function InfluencerDashboardInner() {
     const [loadingContracts, setLoadingContracts] = useState(false);
     const [savingProfile, setSavingProfile] = useState(false);
 
-    // Mobile sidebar toggle
-    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-
     /* ─── Data Fetching ─── */
     const fetchProjects = useCallback(async () => {
         if (!user) return;
@@ -144,7 +135,6 @@ function InfluencerDashboardInner() {
         if (!user) return;
         setLoadingMessages(true);
         try {
-            // Fetch threads without any joins
             const { data: threadsData, error: threadsError } = await supabase
                 .from('conversation_threads')
                 .select('id, campaign_id, brand_id, last_message, last_message_at, created_at')
@@ -164,11 +154,32 @@ function InfluencerDashboardInner() {
                 return;
             }
 
-            // Collect unique brand IDs and campaign IDs (filter out nulls)
-            const brandIds = [...new Set(threadsData.map(t => t.brand_id).filter(Boolean))];
             const campaignIds = [...new Set(threadsData.map(t => t.campaign_id).filter(Boolean))];
 
-            // Fetch brand names and campaign titles separately
+            const latestMsgMap = new Map<string, { content: string; created_at: string }>();
+            if (campaignIds.length > 0) {
+                const { data: messages } = await supabase
+                    .from('messages')
+                    .select('sender_id, receiver_id, content, created_at, campaign_id')
+                    .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+                    .in('campaign_id', campaignIds)
+                    .order('created_at', { ascending: false });
+
+                if (messages) {
+                    const seen = new Set<string>();
+                    for (const m of messages) {
+                        const partnerId = m.sender_id === user.id ? m.receiver_id : m.sender_id;
+                        const key = `${m.campaign_id}::${partnerId}`;
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            latestMsgMap.set(key, { content: m.content, created_at: m.created_at });
+                        }
+                    }
+                }
+            }
+
+            const brandIds = [...new Set(threadsData.map(t => t.brand_id).filter(Boolean))];
+
             let brandsData: { id: string; full_name: string }[] = [];
             if (brandIds.length > 0) {
                 const { data, error } = await supabase
@@ -192,16 +203,20 @@ function InfluencerDashboardInner() {
             const brandMap = new Map(brandsData.map(b => [b.id, b.full_name]));
             const campaignMap = new Map(campaignsData.map(c => [c.id, c.title]));
 
-            const mapped: Thread[] = threadsData.map(t => ({
-                id: t.id,
-                partner_id: t.brand_id,
-                partner_name: brandMap.get(t.brand_id) ?? 'Brand',
-                campaign_id: t.campaign_id,
-                campaign_title: campaignMap.get(t.campaign_id) ?? 'Campaign',
-                last_message: t.last_message || '',
-                last_at: t.last_message_at || t.created_at,
-                unread: false,
-            }));
+            const mapped: Thread[] = threadsData.map(t => {
+                const key = `${t.campaign_id}::${t.brand_id}`;
+                const latest = latestMsgMap.get(key);
+                return {
+                    id: t.id,
+                    partner_id: t.brand_id,
+                    partner_name: brandMap.get(t.brand_id) ?? 'Brand',
+                    campaign_id: t.campaign_id,
+                    campaign_title: campaignMap.get(t.campaign_id) ?? 'Campaign',
+                    last_message: latest?.content || t.last_message || '',
+                    last_at: latest?.created_at || t.last_message_at || t.created_at,
+                    unread: false,
+                };
+            });
 
             setThreads(mapped);
         } catch (err) {
@@ -250,45 +265,32 @@ function InfluencerDashboardInner() {
         setLoadingContracts(false);
     }, [user, supabase]);
 
-    // Initial load
     useEffect(() => {
         if (initialTab === 'projects') fetchProjects();
         if (initialTab === 'inbox') fetchMessages();
         if (initialTab === 'contracts') fetchContracts();
     }, []);
 
-    /* ─── Tab Switching ─── */
     const switchTab = useCallback(async (tab: SubView) => {
         setActiveSub(tab);
-        setMobileSidebarOpen(false);
         if (tab === 'projects') await fetchProjects();
         if (tab === 'inbox') await fetchMessages();
         if (tab === 'contracts') await fetchContracts();
     }, [fetchProjects, fetchMessages, fetchContracts]);
 
-    // React to URL query param changes (e.g. from header notification)
     useEffect(() => {
-        if (tabParam && tabParam !== activeSub) {
-            switchTab(tabParam);
-        }
+        if (tabParam && tabParam !== activeSub) switchTab(tabParam);
     }, [tabParam]);
 
-    /* ─── Profile Save (now computes homepage columns) ─── */
     const handleSaveProfile = async () => {
         setSavingProfile(true);
-
-        // Compute the fields expected by the homepage API
         const niche = profileForm.primary_niche || 'General';
         const totalFollowers =
             (profileForm.ig_followers ? parseInt(profileForm.ig_followers, 10) : 0) +
             (profileForm.tiktok_followers ? parseInt(profileForm.tiktok_followers, 10) : 0) +
             (profileForm.yt_subscribers ? parseInt(profileForm.yt_subscribers, 10) : 0);
         const followersText = totalFollowers > 0 ? `${(totalFollowers / 1000).toFixed(0)}K followers` : '0 followers';
-
-        // Engagement – you can later calculate from stats; default placeholder
         const engagement = '4.5% eng.';
-
-        // Platforms from filled handles
         const platformsList: string[] = [];
         if (profileForm.ig_handle) platformsList.push('Instagram');
         if (profileForm.tiktok_handle) platformsList.push('TikTok');
@@ -313,7 +315,6 @@ function InfluencerDashboardInner() {
             rate_ig_post: profileForm.rate_ig_post,
             rate_video: profileForm.rate_video,
             avatar_url: profileForm.avatar_url,
-            // Homepage columns
             niche,
             followers: followersText,
             engagement,
@@ -348,7 +349,6 @@ function InfluencerDashboardInner() {
     const inboxUnreadCount = threads.filter(t => t.unread).length;
     const activeContractsCount = contracts.filter(c => c.status === 'active').length;
 
-    // Sidebar content (used both on desktop and mobile overlay)
     const sidebarContent = (
         <>
             <div className="sidebar-brand px-6 mb-8 flex items-center justify-between">
@@ -356,13 +356,6 @@ function InfluencerDashboardInner() {
                     <Link href="/" className="logo font-['Playfair_Display'] text-lg font-bold">HYIPE</Link>
                     <span className="role-pill text-[9px] uppercase text-white bg-[#0D0D0B] px-1.5 py-0.5 rounded-full inline-block mt-1">Creator</span>
                 </div>
-                {/* close button for mobile overlay */}
-                <button
-                    onClick={() => setMobileSidebarOpen(false)}
-                    className="lg:hidden text-gray-500 hover:text-black text-lg leading-none"
-                >
-                    ✕
-                </button>
             </div>
             <nav className="sidebar-nav flex-1 px-3">
                 {([
@@ -371,10 +364,7 @@ function InfluencerDashboardInner() {
                     { key: 'contracts', icon: '📄', label: 'Contracts', badge: activeContractsCount },
                     { key: 'inbox',     icon: '◻',  label: 'Inbox',     badge: inboxUnreadCount },
                 ] as { key: SubView; icon: string; label: string; badge?: number }[]).map(({ key, icon, label, badge }) => (
-                    <button key={key} onClick={() => {
-                        router.push(`/dashboard/influencer?tab=${key}`, { scroll: false });
-                        setMobileSidebarOpen(false);
-                    }}
+                    <button key={key} onClick={() => router.push(`/dashboard/influencer?tab=${key}`, { scroll: false })}
                             className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
                                 activeSub === key ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
                             }`}>
@@ -394,7 +384,6 @@ function InfluencerDashboardInner() {
         </>
     );
 
-    // ═══ BANNED CHECK – moved after all hooks, before main render ═══
     if (profile?.status === 'banned') {
         return (
             <div className="p-10 text-center">
@@ -404,32 +393,35 @@ function InfluencerDashboardInner() {
         );
     }
 
-    return (
-        <div className="dashboard-shell flex" style={{ height: 'calc(100vh - 48px)' }}>
-            {/* Mobile sidebar overlay */}
-            {mobileSidebarOpen && (
-                <div className="fixed inset-0 z-50 lg:hidden">
-                    <div className="absolute inset-0 bg-black/40" onClick={() => setMobileSidebarOpen(false)} />
-                    <aside className="absolute left-0 top-0 h-full w-[220px] bg-white border-r border-[#E5E5DF] flex flex-col py-7 px-0 z-50 shadow-xl">
-                        {sidebarContent}
-                    </aside>
-                </div>
-            )}
+    const bottomNavItems = [
+        { key: 'profile',   icon: '◎',  label: 'Profile' },
+        { key: 'projects',  icon: '◈',  label: 'Projects' },
+        { key: 'contracts', icon: '📄', label: 'Contracts', badge: activeContractsCount },
+        { key: 'inbox',     icon: '◻',  label: 'Inbox',     badge: inboxUnreadCount },
+    ] as { key: SubView; icon: string; label: string; badge?: number }[];
 
-            {/* Desktop sidebar – always visible on lg+ screens */}
-            <aside className="sidebar !hidden lg:!flex bg-white border-r border-[#E5E5DF] w-[220px] flex-col py-7 px-0 flex-shrink-0">
+    const navigateMobile = (tab: SubView) => {
+        router.push(`/dashboard/influencer?tab=${tab}`, { scroll: false });
+    };
+
+    return (
+        <div className="dashboard-shell flex flex-col lg:flex-row" style={{ height: 'calc(100vh - 48px)' }}>
+            {/* Desktop sidebar – hidden on mobile */}
+            <aside className="hidden lg:flex bg-white border-r border-[#E5E5DF] w-[220px] flex-col py-7 px-0 flex-shrink-0">
                 {sidebarContent}
             </aside>
 
-            {/* Main content */}
             <main className="dash-content bg-[#F6F6F2] flex-1 overflow-hidden flex flex-col">
-                {/* Mobile header with hamburger */}
-                <div className="lg:hidden flex items-center p-4 bg-white border-b border-[#E5E5DF]">
-                    <button onClick={() => setMobileSidebarOpen(true)} className="text-xl font-bold mr-3">☰</button>
-                    <span className="font-['Playfair_Display'] text-lg font-bold">HYIPE</span>
+                {/* Mobile header */}
+                <div className="lg:hidden flex items-center justify-between p-3 bg-white border-b border-[#E5E5DF] flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                        <Link href="/" className="font-['Playfair_Display'] text-lg font-bold text-[#0D0D0B]">HYIPE</Link>
+                        <span className="text-[9px] uppercase text-white bg-[#0D0D0B] px-1.5 py-0.5 rounded-full">Creator</span>
+                    </div>
+                    <button onClick={() => signOut()} className="text-xl leading-none text-[#888880] hover:text-[#0D0D0B]">✕</button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-10">
+                <div className="flex-1 overflow-y-auto p-4 md:p-10 pb-20 lg:pb-10">
                     {activeSub === 'profile' && (
                         <ProfileSection form={profileForm} setForm={setProfileForm} onSave={handleSaveProfile} saving={savingProfile} />
                     )}
@@ -454,6 +446,29 @@ function InfluencerDashboardInner() {
                         />
                     )}
                 </div>
+
+                {/* Mobile Bottom Navigation */}
+                <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#E5E5DF] flex justify-around items-center py-2 z-40 safe-area-bottom">
+                    {bottomNavItems.map(({ key, icon, label, badge }) => (
+                        <button
+                            key={key}
+                            onClick={() => navigateMobile(key)}
+                            className={`flex flex-col items-center gap-0.5 px-2 py-1 min-w-[56px] text-[10px] transition-colors ${
+                                activeSub === key ? 'text-[#0D0D0B] font-medium' : 'text-[#888880]'
+                            }`}
+                        >
+                            <span className="text-[15px] leading-none relative">
+                                {icon}
+                                {badge != null && badge > 0 && (
+                                    <span className="absolute -top-1.5 -right-2.5 bg-[#0D0D0B] text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center">
+                                        {badge}
+                                    </span>
+                                )}
+                            </span>
+                            <span>{label}</span>
+                        </button>
+                    ))}
+                </nav>
             </main>
         </div>
     );
@@ -482,23 +497,18 @@ function ProfileSection({ form, setForm, onSave, saving }: {
         const file = e.target.files?.[0];
         if (!file || !user) return;
         setUploadingAvatar(true);
-
         const fileExt = file.name.split('.').pop();
         const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-
         const { error: uploadError } = await supabase.storage
             .from('avatars')
             .upload(fileName, file, { upsert: true });
-
         if (uploadError) {
             alert('Upload failed: ' + uploadError.message);
             setUploadingAvatar(false);
             return;
         }
-
         const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
         const publicUrl = urlData.publicUrl;
-
         setForm(prev => ({ ...prev, avatar_url: publicUrl }));
         await supabase.from('profiles').upsert({ id: user.id, avatar_url: publicUrl });
         setUploadingAvatar(false);
@@ -705,11 +715,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
     const submitMilestone = async (milestoneId: string, text: string, url: string) => {
         const { error } = await supabase
             .from('milestones')
-            .update({
-                status: 'submitted',
-                submission_text: text,
-                submission_url: url,
-            })
+            .update({ status: 'submitted', submission_text: text, submission_url: url })
             .eq('id', milestoneId);
         if (!error) onRefresh();
     };
@@ -734,7 +740,6 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                 <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Contracts</h1>
                 <p className="text-sm text-[#888880] mt-1">Track your milestones and payments from brands.</p>
             </div>
-
             {loading ? (
                 <p className="text-sm text-[#888880]">Loading contracts...</p>
             ) : contracts.length === 0 ? (
@@ -765,7 +770,6 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                                                 <span className="text-xs text-[#888880]">{isOpen ? '▲' : '▼'}</span>
                                             </div>
                                         </div>
-
                                         {isOpen && (
                                             <div className="border-t border-[#E5E5DF] p-4">
                                                 {totalBudget > 0 && (
@@ -779,7 +783,6 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                                                         </div>
                                                     </div>
                                                 )}
-
                                                 {contract.milestones.length === 0 ? (
                                                     <div className="bg-[#FFF8E6] border border-[#F0D88A] rounded p-3 text-xs text-[#7A5200]">
                                                         ⏳ The brand hasn&apos;t set any milestones yet. Check back soon.
@@ -828,7 +831,6 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
                             })}
                         </div>
                     </div>
-
                     {completedContracts.length > 0 && (
                         <div>
                             <h3 className="font-medium text-sm mb-3 text-[#888880]">Completed ({completedContracts.length})</h3>
@@ -851,7 +853,7 @@ function ContractsSection({ contracts, loading, supabase, onRefresh }: {
     );
 }
 
-/* ─── Inbox Section ─── */
+/* ─── Inbox Section (with mobile toggle and thread update on send) ─── */
 function InboxSection({
                           threads,
                           loading,
@@ -874,6 +876,7 @@ function InboxSection({
     const [conversation, setConversation] = useState<Message[]>([]);
     const [conversationLoading, setConversationLoading] = useState(false);
     const [replyText, setReplyText] = useState('');
+    const [showChatMobile, setShowChatMobile] = useState(false);
     const convoEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -884,6 +887,7 @@ function InboxSection({
     const loadConversation = useCallback(async (thread: Thread) => {
         setSelectedThread(thread);
         setConversationLoading(true);
+        setShowChatMobile(true);
 
         let query = supabase
             .from('messages')
@@ -909,10 +913,8 @@ function InboxSection({
                 return;
             }
 
-            // Collect unique sender IDs (except current user)
             const senderIds = [...new Set(messagesData.map(m => m.sender_id).filter(id => id !== currentUserId))];
 
-            // Fetch sender profiles manually
             const senderMap = new Map<string, string>();
             if (senderIds.length > 0) {
                 const { data: profiles } = await supabase
@@ -949,7 +951,6 @@ function InboxSection({
         }
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
 
-    // Auto‑open thread from URL params
     useEffect(() => {
         if (!initialPartnerId || threads.length === 0) return;
 
@@ -963,7 +964,6 @@ function InboxSection({
         }
     }, [initialPartnerId, initialCampaignId, threads, loadConversation, selectedThread]);
 
-    // Mark all messages as read on mount
     useEffect(() => {
         const markAllReadAndRefresh = async () => {
             await supabase.from('messages').update({ read: true }).eq('receiver_id', currentUserId).eq('read', false);
@@ -982,28 +982,42 @@ function InboxSection({
             campaign_id: selectedThread.campaign_id || null,
             read: false,
         };
-        const { data, error } = await supabase.from('messages').insert(newMsg).select('id, created_at').single();
-        if (error) return;
-        setConversation(prev => [...prev, {
-            id: data.id, sender_id: currentUserId, receiver_id: selectedThread.partner_id,
-            content: newMsg.content, created_at: data.created_at, read: false,
-            campaign_id: selectedThread.campaign_id, sender_full_name: 'You',
-        }]);
-        setReplyText('');
-        setTimeout(scrollToBottom, 30);
-        inputRef.current?.focus();
+        try {
+            const { data, error } = await supabase.from('messages').insert(newMsg).select('id, created_at').single();
+            if (error) return;
+
+            await supabase
+                .from('conversation_threads')
+                .update({ last_message: replyText.trim(), last_message_at: data.created_at })
+                .eq('id', selectedThread.id);
+
+            setConversation(prev => [...prev, {
+                id: data.id, sender_id: currentUserId, receiver_id: selectedThread.partner_id,
+                content: newMsg.content, created_at: data.created_at, read: false,
+                campaign_id: selectedThread.campaign_id, sender_full_name: 'You',
+            }]);
+            setReplyText('');
+            setTimeout(scrollToBottom, 30);
+            inputRef.current?.focus();
+        } catch (err) {
+            console.error('Error sending message:', err);
+        }
+    };
+
+    const handleBackToList = () => {
+        setShowChatMobile(false);
+        setSelectedThread(null);
     };
 
     return (
-        <div className="flex flex-col flex-1 overflow-hidden">
-            <div className="dash-header mb-4 flex-shrink-0">
+        <div className="flex flex-col flex-1 overflow-hidden h-full">
+            <div className="hidden md:block dash-header mb-4 flex-shrink-0">
                 <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Inbox</h1>
                 <p className="text-sm text-[#888880] mt-1">Campaign-scoped messages from brands.</p>
             </div>
-            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
-                {/* Thread List */}
-                <div className="border-r md:border-r border-b md:border-b-0 border-[#E5E5DF] flex flex-col min-h-0">
-                    <div className="px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium flex-shrink-0">
+            <div className="flex-1 min-h-0 md:grid md:grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+                <div className={`border-r md:border-r border-b md:border-b-0 border-[#E5E5DF] flex flex-col min-h-0 ${showChatMobile ? 'hidden md:flex' : 'flex'}`}>
+                    <div className="px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium flex-shrink-0 bg-[#F6F6F2] md:bg-white">
                         Conversations
                     </div>
                     <div className="flex-1 overflow-y-auto">
@@ -1037,12 +1051,11 @@ function InboxSection({
                         )}
                     </div>
                 </div>
-
-                {/* Chat Pane */}
-                <div className="flex flex-col min-h-0">
+                <div className={`flex flex-col min-h-0 ${showChatMobile ? 'flex' : 'hidden md:flex'}`}>
                     {selectedThread ? (
                         <>
                             <div className="px-4 py-3 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
+                                <button onClick={handleBackToList} className="md:hidden text-lg leading-none mr-1 text-[#888880] hover:text-[#0D0D0B]">←</button>
                                 <div className="w-9 h-9 rounded-full bg-[#E8E8E2] flex items-center justify-center text-sm font-medium flex-shrink-0">
                                     {selectedThread.partner_name.slice(0, 2).toUpperCase()}
                                 </div>

@@ -26,6 +26,7 @@ export default function AuthPage() {
     const [error, setError] = useState('');
     const [info, setInfo] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
 
     useEffect(() => {
         if (!authLoading && user && profile?.role) {
@@ -280,13 +281,22 @@ export default function AuthPage() {
                                 onChange={(e) => setEmail(e.target.value)}
                             />
 
-                            <input
-                                className="w-full p-3 border text-sm"
-                                placeholder="Password"
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
+                            <div className="relative">
+                                <input
+                                    className="w-full p-3 border text-sm pr-16"
+                                    placeholder="Password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-700"
+                                >
+                                    {showPassword ? 'Hide' : 'Show'}
+                                </button>
+                            </div>
 
                             {error && <p className="text-xs text-red-500">{error}</p>}
 
@@ -309,13 +319,22 @@ export default function AuthPage() {
                                 onChange={(e) => setEmail(e.target.value)}
                             />
 
-                            <input
-                                className="w-full p-3 border text-sm"
-                                placeholder="Password"
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
+                            <div className="relative">
+                                <input
+                                    className="w-full p-3 border text-sm pr-16"
+                                    placeholder="Password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-700"
+                                >
+                                    {showPassword ? 'Hide' : 'Show'}
+                                </button>
+                            </div>
 
                             {error && <p className="text-xs text-red-500">{error}</p>}
 

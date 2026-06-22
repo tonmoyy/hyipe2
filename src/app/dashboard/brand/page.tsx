@@ -40,7 +40,7 @@ type Message = {
 };
 
 type Thread = {
-    id?: string;
+    id: string;
     partner_id: string;
     partner_name: string;
     campaign_id: string;
@@ -74,33 +74,6 @@ interface RawCampaignRow {
     applications?: { count: number }[] | { count: number };
 }
 
-interface RawApplicationRow {
-    id: string; campaign_id: string; influencer_id: string; pitch: string; status: string;
-    influencer: { full_name: string; email: string }[] | { full_name: string; email: string };
-    campaign: { title: string }[] | { title: string };
-}
-
-interface RawInboxMessageRow {
-    id: string; sender_id: string; receiver_id: string; content: string;
-    created_at: string; read: boolean; campaign_id: string | null;
-    sender: { full_name: string } | { full_name: string }[] | null;
-}
-
-interface RawContractRow {
-    id: string;
-    campaign_id: string;
-    brand_id: string;
-    influencer_id: string;
-    application_id: string;
-    status: string;
-    created_at: string;
-    title: string;
-    budget: number;
-    influencer: { full_name: string };
-    campaign: { title: string };
-    milestones: Milestone[];
-}
-
 /* ─── Defaults ─── */
 const defaultBrandForm: BrandFormType = {
     company_name: '', industry: '', website: '', contact_person: '', description: '', ntn: '', payment_number: '',
@@ -123,6 +96,7 @@ function BrandDashboardInner() {
     const initialTab: SubView = tabParam && ['profile','campaigns','inbox','applications','contracts'].includes(tabParam) ? tabParam : 'profile';
     const partnerParam = searchParams?.get('partner') || null;
     const campaignParam = searchParams?.get('campaign') || null;
+    const threadParam = searchParams?.get('thread') || null;
 
     const [activeSub, setActiveSub] = useState<SubView>(initialTab);
     const [brandForm, setBrandForm] = useState<BrandFormType>(() => ({
@@ -144,8 +118,6 @@ function BrandDashboardInner() {
     const [showCampSuccess, setShowCampSuccess] = useState(false);
     const [campaignForm, setCampaignForm] = useState<CampaignFormType>(defaultCampaignForm);
     const [submittingCampaign, setSubmittingCampaign] = useState(false);
-
-    // Mobile sidebar toggle
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
     /* ─── Data Fetching ─── */
@@ -165,112 +137,197 @@ function BrandDashboardInner() {
         setLoadingCampaigns(false);
     }, [user, supabase]);
 
+    /* ─── FETCH MESSAGES – manual batch, null‑safe campaign IDs ─── */
     const fetchMessages = useCallback(async () => {
         if (!user) return;
         setLoadingMessages(true);
+        try {
+            const { data: threadsData, error: threadsError } = await supabase
+                .from('conversation_threads')
+                .select('id, campaign_id, influencer_id, last_message, last_message_at, created_at')
+                .eq('brand_id', user.id)
+                .order('last_message_at', { ascending: false });
 
-        const { data } = await supabase
-            .from('conversation_threads')
-            .select(`
-                *,
-                campaign:campaigns(title),
-                influencer:profiles!conversation_threads_influencer_id_fkey(full_name)
-            `)
-            .eq('brand_id', user.id)
-            .order('last_message_at', { ascending: false });
+            if (threadsError) {
+                console.error('Error fetching threads:', threadsError);
+                alert('Error loading messages: ' + threadsError.message);
+                setThreads([]);
+                return;
+            }
 
-        const mappedThreads: Thread[] = (data || []).map(thread => ({
-            id: thread.id,
-            partner_id: thread.influencer_id,
-            partner_name: thread.influencer?.full_name || 'Influencer',
-            campaign_id: thread.campaign_id,
-            campaign_title: thread.campaign?.title || 'Campaign',
-            last_message: thread.last_message || '',
-            last_at: thread.last_message_at || thread.created_at,
-            unread: false,
-        }));
+            if (!threadsData || threadsData.length === 0) {
+                setThreads([]);
+                return;
+            }
 
-        setThreads(mappedThreads);
-        setLoadingMessages(false);
+            // Collect campaign IDs
+            const campaignIds = [...new Set(threadsData.map(t => t.campaign_id).filter(Boolean))];
+
+            // Fetch latest message for each conversation
+            let latestMsgMap = new Map<string, { content: string; created_at: string }>();
+            if (campaignIds.length > 0) {
+                const { data: messages } = await supabase
+                    .from('messages')
+                    .select('sender_id, receiver_id, content, created_at, campaign_id')
+                    .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+                    .in('campaign_id', campaignIds)
+                    .order('created_at', { ascending: false });
+
+                if (messages) {
+                    const seen = new Set<string>();
+                    for (const m of messages) {
+                        const partnerId = m.sender_id === user.id ? m.receiver_id : m.sender_id;
+                        const key = `${m.campaign_id}::${partnerId}`;
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            latestMsgMap.set(key, { content: m.content, created_at: m.created_at });
+                        }
+                    }
+                }
+            }
+
+            // Fetch profiles and campaigns for names
+            const influencerIds = [...new Set(threadsData.map(t => t.influencer_id).filter(Boolean))];
+            const allCampaignIds = [...new Set(threadsData.map(t => t.campaign_id).filter(Boolean))];
+
+            let profilesData: { id: string; full_name: string }[] = [];
+            if (influencerIds.length > 0) {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('id, full_name')
+                    .in('id', influencerIds);
+                if (error) console.error('Error fetching profiles:', error);
+                profilesData = data ?? [];
+            }
+
+            let campaignsData: { id: string; title: string }[] = [];
+            if (allCampaignIds.length > 0) {
+                const { data, error } = await supabase
+                    .from('campaigns')
+                    .select('id, title')
+                    .in('id', allCampaignIds);
+                if (error) console.error('Error fetching campaigns:', error);
+                campaignsData = data ?? [];
+            }
+
+            const profileMap = new Map(profilesData.map(p => [p.id, p.full_name]));
+            const campaignMap = new Map(campaignsData.map(c => [c.id, c.title]));
+
+            const mapped: Thread[] = threadsData.map(t => {
+                const key = `${t.campaign_id}::${t.influencer_id}`;
+                const latest = latestMsgMap.get(key);
+                return {
+                    id: t.id,
+                    partner_id: t.influencer_id,
+                    partner_name: profileMap.get(t.influencer_id) ?? 'Influencer',
+                    campaign_id: t.campaign_id ?? '',
+                    campaign_title: campaignMap.get(t.campaign_id) ?? 'Campaign',
+                    last_message: latest?.content || t.last_message || '',
+                    last_at: latest?.created_at || t.last_message_at || t.created_at,
+                    unread: false,
+                };
+            });
+
+            setThreads(mapped);
+        } catch (err) {
+            console.error('Unexpected error in fetchMessages:', err);
+        } finally {
+            setLoadingMessages(false);
+        }
     }, [user, supabase]);
 
+    /* ─── FETCH APPLICATIONS – manual batch approach ─── */
     const fetchApplications = useCallback(async () => {
         if (!user) return;
         setLoadingApplications(true);
-        const campaignIds = campaigns.map(c => c.id);
-        if (campaignIds.length === 0) { setApplications([]); setLoadingApplications(false); return; }
-        const { data } = await supabase
-            .from('applications')
-            .select('id, campaign_id, influencer_id, pitch, status, influencer:profiles!applications_influencer_id_fkey(full_name, email), campaign:campaigns(title)')
-            .in('campaign_id', campaignIds)
-            .order('created_at', { ascending: false });
-
-        const rows = (data ?? []) as unknown as RawApplicationRow[];
-        setApplications(rows.map(item => ({
-            id: item.id, campaign_id: item.campaign_id, influencer_id: item.influencer_id,
-            pitch: item.pitch, status: item.status,
-            influencer: {
-                full_name: Array.isArray(item.influencer) ? item.influencer[0]?.full_name ?? 'Unknown' : item.influencer?.full_name ?? 'Unknown',
-                email: Array.isArray(item.influencer) ? item.influencer[0]?.email ?? '' : item.influencer?.email ?? '',
-            },
-            campaign: {
-                title: Array.isArray(item.campaign) ? item.campaign[0]?.title ?? 'Untitled' : item.campaign?.title ?? 'Untitled',
-            },
-        })));
-        setLoadingApplications(false);
-    }, [user, supabase, campaigns]);
+        try {
+            const { data: campaignsData, error: campaignsError } = await supabase
+                .from('campaigns')
+                .select('id')
+                .eq('brand_id', user.id);
+            if (campaignsError) {
+                console.error('Error fetching campaign IDs:', campaignsError);
+                alert('Error loading applications: ' + campaignsError.message);
+                setLoadingApplications(false);
+                return;
+            }
+            const campaignIds = (campaignsData || []).map(c => c.id);
+            if (campaignIds.length === 0) {
+                setApplications([]);
+                setLoadingApplications(false);
+                return;
+            }
+            const { data: appsData, error: appsError } = await supabase
+                .from('applications')
+                .select('id, campaign_id, influencer_id, pitch, status')
+                .in('campaign_id', campaignIds)
+                .order('created_at', { ascending: false });
+            if (appsError) {
+                console.error('Error fetching applications:', appsError);
+                alert('Error loading applications: ' + appsError.message);
+                setLoadingApplications(false);
+                return;
+            }
+            if (!appsData || appsData.length === 0) {
+                setApplications([]);
+                setLoadingApplications(false);
+                return;
+            }
+            const influencerIds = [...new Set(appsData.map(a => a.influencer_id))];
+            const appCampaignIds = [...new Set(appsData.map(a => a.campaign_id))];
+            const [profilesRes, campaignsRes] = await Promise.all([
+                influencerIds.length > 0 ? supabase.from('profiles').select('id, full_name, email').in('id', influencerIds) : { data: [] },
+                appCampaignIds.length > 0 ? supabase.from('campaigns').select('id, title').in('id', appCampaignIds) : { data: [] },
+            ]);
+            const profileMap = new Map((profilesRes.data ?? []).map(p => [p.id, { full_name: p.full_name, email: p.email }]));
+            const campaignMap = new Map((campaignsRes.data ?? []).map(c => [c.id, c.title]));
+            const apps: Application[] = appsData.map(a => ({
+                id: a.id,
+                campaign_id: a.campaign_id,
+                influencer_id: a.influencer_id,
+                pitch: a.pitch,
+                status: a.status,
+                influencer: profileMap.get(a.influencer_id) ?? { full_name: 'Unknown', email: '' },
+                campaign: { title: campaignMap.get(a.campaign_id) ?? 'Untitled' },
+            }));
+            setApplications(apps);
+        } catch (err) {
+            console.error('Unexpected error in fetchApplications:', err);
+            alert('An unexpected error occurred while loading applications.');
+        } finally {
+            setLoadingApplications(false);
+        }
+    }, [user, supabase]);
 
     const fetchContracts = useCallback(async () => {
         if (!user) return;
         setLoadingContracts(true);
-
         const { data: contractsData, error } = await supabase
             .from('contracts')
             .select(`
-                id,
-                campaign_id,
-                brand_id,
-                influencer_id,
-                application_id,
-                status,
-                created_at,
-                title,
-                budget,
+                id, campaign_id, brand_id, influencer_id, application_id,
+                status, created_at, title, budget,
                 milestones ( id, contract_id, title, description, amount, due_date, status, order_index )
             `)
             .eq('brand_id', user.id)
             .order('created_at', { ascending: false });
-
-        if (error) {
-            console.error(error);
-            setLoadingContracts(false);
-            return;
-        }
-
+        if (error) { console.error(error); setLoadingContracts(false); return; }
         const influencerIds = [...new Set((contractsData ?? []).map(c => c.influencer_id))];
         const campaignIds   = [...new Set((contractsData ?? []).map(c => c.campaign_id))];
-
         const [influencerRes, campaignRes] = await Promise.all([
             influencerIds.length > 0 ? supabase.from('profiles').select('id, full_name').in('id', influencerIds) : { data: [] },
             campaignIds.length > 0   ? supabase.from('campaigns').select('id, title').in('id', campaignIds) : { data: [] },
         ]);
-
         const influencerMap = new Map((influencerRes.data ?? []).map(p => [p.id, p.full_name]));
         const campaignMap   = new Map((campaignRes.data ?? []).map(c => [c.id, c.title]));
-
         const contracts: Contract[] = (contractsData ?? []).map(row => ({
-            id: row.id,
-            campaign_id: row.campaign_id,
-            brand_id: row.brand_id,
-            influencer_id: row.influencer_id,
-            application_id: row.application_id,
-            status: row.status as Contract['status'],
-            created_at: row.created_at,
+            id: row.id, campaign_id: row.campaign_id, brand_id: row.brand_id,
+            influencer_id: row.influencer_id, application_id: row.application_id,
+            status: row.status as Contract['status'], created_at: row.created_at,
             influencer_name: influencerMap.get(row.influencer_id) ?? 'Unknown',
             campaign_title: campaignMap.get(row.campaign_id) ?? 'Untitled',
             milestones: (row.milestones ?? []).sort((a, b) => a.order_index - b.order_index),
         }));
-
         setContracts(contracts);
         setLoadingContracts(false);
     }, [user, supabase]);
@@ -279,31 +336,23 @@ function BrandDashboardInner() {
     useEffect(() => {
         if (initialTab === 'campaigns') fetchCampaigns();
         if (initialTab === 'inbox') fetchMessages();
-        if (initialTab === 'applications') { fetchCampaigns(); }
+        if (initialTab === 'applications') fetchApplications();
         if (initialTab === 'contracts') fetchContracts();
-    }, []);
-
-    // Fetch applications once campaigns are loaded
-    useEffect(() => {
-        if (campaigns.length > 0 && activeSub === 'applications') fetchApplications();
-    }, [campaigns, activeSub, fetchApplications]);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     /* ─── Tab Switching ─── */
     const switchTab = useCallback(async (tab: SubView) => {
         setActiveSub(tab);
-        setMobileSidebarOpen(false); // close mobile sidebar on tab switch
+        setMobileSidebarOpen(false);
         if (tab === 'campaigns') await fetchCampaigns();
         if (tab === 'inbox') await fetchMessages();
-        if (tab === 'applications') { await fetchCampaigns(); }
+        if (tab === 'applications') await fetchApplications();
         if (tab === 'contracts') await fetchContracts();
-    }, [fetchCampaigns, fetchMessages, fetchContracts]);
+    }, [fetchCampaigns, fetchMessages, fetchApplications, fetchContracts]);
 
-    // React to URL query param changes (e.g. from header notification)
     useEffect(() => {
-        if (tabParam && tabParam !== activeSub) {
-            switchTab(tabParam);
-        }
-    }, [tabParam]);
+        if (tabParam && tabParam !== activeSub) switchTab(tabParam);
+    }, [tabParam, activeSub, switchTab]);
 
     /* ─── Handlers ─── */
     const handleSaveProfile = async () => {
@@ -387,7 +436,7 @@ function BrandDashboardInner() {
                     last_message: 'Conversation started',
                     last_message_at: new Date().toISOString(),
                 })
-                .select()
+                .select('id')
                 .single();
 
             if (error) { alert(error.message); return; }
@@ -427,7 +476,7 @@ function BrandDashboardInner() {
         );
     }
 
-    // Sidebar content (used both on desktop and mobile overlay)
+    // Sidebar content (desktop only)
     const sidebarContent = (
         <>
             <div className="sidebar-brand px-6 mb-8 flex items-center justify-between">
@@ -435,13 +484,6 @@ function BrandDashboardInner() {
                     <Link href="/" className="logo font-['Playfair_Display'] text-lg font-bold">HYIPE</Link>
                     <span className="text-[9px] uppercase text-white bg-[#5E7A0A] px-1.5 py-0.5 rounded-full inline-block mt-1">Brand</span>
                 </div>
-                {/* close button for mobile overlay */}
-                <button
-                    onClick={() => setMobileSidebarOpen(false)}
-                    className="lg:hidden text-gray-500 hover:text-black text-lg leading-none"
-                >
-                    ✕
-                </button>
             </div>
             <nav className="sidebar-nav flex-1 px-3">
                 {([
@@ -453,7 +495,6 @@ function BrandDashboardInner() {
                 ] as { key: SubView; icon: string; label: string; badge?: number }[]).map(({ key, icon, label, badge }) => (
                     <button key={key} onClick={() => {
                         router.push(`/dashboard/brand?tab=${key}`, { scroll: false });
-                        setMobileSidebarOpen(false);
                     }}
                             className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded mb-0.5 w-full text-left ${
                                 activeSub === key ? 'bg-[#F0F0EA] font-medium text-[#0D0D0B]' : 'text-[#3A3A36] hover:bg-[#F0F0EA]'
@@ -474,32 +515,39 @@ function BrandDashboardInner() {
         </>
     );
 
-    return (
-        <div className="dashboard-shell flex" style={{ height: 'calc(100vh - 48px)' }}>
-            {/* Mobile sidebar overlay */}
-            {mobileSidebarOpen && (
-                <div className="fixed inset-0 z-50 lg:hidden">
-                    <div className="absolute inset-0 bg-black/40" onClick={() => setMobileSidebarOpen(false)} />
-                    <aside className="absolute left-0 top-0 h-full w-[220px] bg-white border-r border-[#E5E5DF] flex flex-col py-7 px-0 z-50 shadow-xl">
-                        {sidebarContent}
-                    </aside>
-                </div>
-            )}
+    // Bottom nav items for mobile
+    const bottomNavItems = [
+        { key: 'profile',      icon: '◎',  label: 'Profile' },
+        { key: 'campaigns',    icon: '◈',  label: 'Campaigns' },
+        { key: 'applications', icon: '📋', label: 'Apps' },
+        { key: 'contracts',    icon: '📄', label: 'Contracts', badge: contractsCount },
+        { key: 'inbox',        icon: '◻',  label: 'Inbox', badge: inboxUnreadCount },
+    ] as { key: SubView; icon: string; label: string; badge?: number }[];
 
-            {/* Desktop sidebar – always visible on lg+ screens */}
-            <aside className="sidebar !hidden lg:!flex bg-white border-r border-[#E5E5DF] w-[220px] flex-col py-7 px-0 flex-shrink-0">
+    const navigateMobile = (tab: SubView) => {
+        router.push(`/dashboard/brand?tab=${tab}`, { scroll: false });
+    };
+
+    return (
+        <div className="dashboard-shell flex flex-col lg:flex-row" style={{ height: 'calc(100vh - 48px)' }}>
+            {/* Desktop sidebar – hidden on mobile */}
+            <aside className="hidden lg:flex bg-white border-r border-[#E5E5DF] w-[220px] flex-col py-7 px-0 flex-shrink-0">
                 {sidebarContent}
             </aside>
 
             {/* Main Content */}
             <main className="dash-content bg-[#F6F6F2] flex-1 overflow-hidden flex flex-col">
-                {/* Mobile header with hamburger */}
-                <div className="lg:hidden flex items-center p-4 bg-white border-b border-[#E5E5DF]">
-                    <button onClick={() => setMobileSidebarOpen(true)} className="text-xl font-bold mr-3">☰</button>
-                    <span className="font-['Playfair_Display'] text-lg font-bold">HYIPE</span>
+                {/* Mobile header – visible only on small screens */}
+                <div className="lg:hidden flex items-center justify-between p-3 bg-white border-b border-[#E5E5DF] flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                        <Link href="/" className="font-['Playfair_Display'] text-lg font-bold text-[#0D0D0B]">HYIPE</Link>
+                        <span className="text-[9px] uppercase text-white bg-[#5E7A0A] px-1.5 py-0.5 rounded-full">Brand</span>
+                    </div>
+                    <button onClick={() => signOut()} className="text-xl leading-none text-[#888880] hover:text-[#0D0D0B]">✕</button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-10">
+                {/* Scrollable content area */}
+                <div className="flex-1 overflow-y-auto p-4 md:p-10 pb-20 lg:pb-10">
                     {activeSub === 'profile' && (
                         <BrandProfileSection form={brandForm} setForm={setBrandForm} onSave={handleSaveProfile} saving={savingProfile} />
                     )}
@@ -523,16 +571,40 @@ function BrandDashboardInner() {
                     )}
                     {activeSub === 'inbox' && (
                         <BrandInboxSection
-                            key={`${partnerParam}-${campaignParam}`}
+                            key={`${partnerParam}-${campaignParam}-${threadParam}`}
                             threads={threads} loading={loadingMessages}
                             currentUserId={user!.id}
                             onThreadRead={handleThreadRead}
                             onRefreshThreads={fetchMessages}
                             initialPartnerId={partnerParam}
                             initialCampaignId={campaignParam}
+                            initialThreadId={threadParam}
                         />
                     )}
                 </div>
+
+                {/* Mobile Bottom Navigation – visible only on small screens */}
+                <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#E5E5DF] flex justify-around items-center py-2 z-40 safe-area-bottom">
+                    {bottomNavItems.map(({ key, icon, label, badge }) => (
+                        <button
+                            key={key}
+                            onClick={() => navigateMobile(key)}
+                            className={`flex flex-col items-center gap-0.5 px-2 py-1 min-w-[56px] text-[10px] transition-colors ${
+                                activeSub === key ? 'text-[#0D0D0B] font-medium' : 'text-[#888880]'
+                            }`}
+                        >
+                            <span className="text-[15px] leading-none relative">
+                                {icon}
+                                {badge != null && badge > 0 && (
+                                    <span className="absolute -top-1.5 -right-2.5 bg-[#0D0D0B] text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center">
+                                        {badge}
+                                    </span>
+                                )}
+                            </span>
+                            <span>{label}</span>
+                        </button>
+                    ))}
+                </nav>
             </main>
 
             {/* Campaign Modal */}
@@ -627,7 +699,7 @@ export default function BrandDashboard() {
     return <DashboardRoleGuard roleParam="brand"><BrandDashboardInner /></DashboardRoleGuard>;
 }
 
-/* ─── Brand Profile Section ─── */
+/* ─── Brand Profile Section (unchanged) ─── */
 function BrandProfileSection({ form, setForm, onSave, saving }: {
     form: BrandFormType;
     setForm: React.Dispatch<React.SetStateAction<BrandFormType>>;
@@ -681,7 +753,6 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
             <div className="profile-card bg-white border border-[#E5E5DF] rounded p-4 md:p-7 mb-4 md:mb-5">
                 <h3 className="text-[13px] uppercase tracking-[0.06em] text-[#888880] mb-5 pb-3 border-b border-[#E5E5DF]">Brand Identity</h3>
                 <div className="profile-avatar-row flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6">
-                    {/* Avatar / Logo preview */}
                     <div
                         className="w-16 h-16 bg-[#E8E8E2] rounded flex items-center justify-center font-['Playfair_Display'] text-2xl font-bold text-[#3A3A36] border border-dashed border-[#C0C0B8] overflow-hidden"
                         style={{ borderRadius: '4px' }}
@@ -758,11 +829,10 @@ function BrandProfileSection({ form, setForm, onSave, saving }: {
     );
 }
 
-/* ─── Campaigns Section ─── */
+/* ─── Campaigns Section (unchanged) ─── */
 function CampaignsSection({ campaigns, loading, openCampModal }: {
     campaigns: Campaign[]; loading: boolean; openCampModal: () => void;
 }) {
-    // ... (unchanged)
     const [activeTab, setActiveTab] = useState<'all' | 'under_review' | 'live' | 'completed'>('all');
     const filtered = activeTab === 'all' ? campaigns : campaigns.filter(c => c.status === activeTab);
     const count = (tab: string) => tab === 'all' ? campaigns.length : campaigns.filter(c => c.status === tab).length;
@@ -817,13 +887,12 @@ function CampaignsSection({ campaigns, loading, openCampModal }: {
     );
 }
 
-/* ─── Applications Section ─── */
+/* ─── Applications Section (unchanged) ─── */
 function ApplicationsSection({ applications, loading, onAccept, onReject, onMessage }: {
     applications: Application[]; loading: boolean;
     onAccept: (id: string) => void; onReject: (id: string) => void;
     onMessage: (appId: string, influencerId: string, campaignId: string) => void;
 }) {
-    // ... (unchanged)
     const pendingApps = applications.filter(a => a.status === 'applied');
     const acceptedApps = applications.filter(a => a.status === 'accepted');
     const rejectedApps = applications.filter(a => a.status === 'rejected');
@@ -908,12 +977,11 @@ function ApplicationsSection({ applications, loading, onAccept, onReject, onMess
     );
 }
 
-/* ─── Contracts Section (Brand) ─── */
+/* ─── Contracts Section (Brand) – FIXED handleMarkPaid ─── */
 function ContractsSection({ contracts, loading, currentUserId, supabase, onRefresh }: {
     contracts: Contract[]; loading: boolean; currentUserId: string;
     supabase: ReturnType<typeof createClient>; onRefresh: () => void;
 }) {
-    // ... (unchanged)
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [addingTo, setAddingTo] = useState<string | null>(null);
     const [newMilestone, setNewMilestone] = useState({ title: '', description: '', amount: '', due_date: '' });
@@ -1112,7 +1180,7 @@ function ContractsSection({ contracts, loading, currentUserId, supabase, onRefre
     );
 }
 
-/* ─── Brand Inbox Section ─── */
+/* ─── Brand Inbox Section (mobile‑friendly, updates thread on send) ─── */
 function BrandInboxSection({
                                threads,
                                loading,
@@ -1121,6 +1189,7 @@ function BrandInboxSection({
                                onRefreshThreads,
                                initialPartnerId,
                                initialCampaignId,
+                               initialThreadId,
                            }: {
     threads: Thread[];
     loading: boolean;
@@ -1129,27 +1198,32 @@ function BrandInboxSection({
     onRefreshThreads: () => Promise<void>;
     initialPartnerId: string | null;
     initialCampaignId: string | null;
+    initialThreadId: string | null;
 }) {
-    // ... (unchanged)
     const supabase = createClient();
     const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
     const [conversation, setConversation] = useState<Message[]>([]);
     const [conversationLoading, setConversationLoading] = useState(false);
     const [replyText, setReplyText] = useState('');
+    const [showChatMobile, setShowChatMobile] = useState(false);
     const convoEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const autoOpenedRef = useRef<string | null>(null);
+    const creatingThreadRef = useRef(false);
 
     const scrollToBottom = useCallback(() => {
         convoEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }, []);
 
+    /* ─── loadConversation – manual sender profile fetch ─── */
     const loadConversation = useCallback(async (thread: Thread) => {
         setSelectedThread(thread);
         setConversationLoading(true);
+        setShowChatMobile(true);
 
         let query = supabase
             .from('messages')
-            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id, sender:profiles!messages_sender_id_fkey(full_name)')
+            .select('id, sender_id, receiver_id, content, created_at, read, campaign_id')
             .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${thread.partner_id}),and(sender_id.eq.${thread.partner_id},receiver_id.eq.${currentUserId})`)
             .order('created_at', { ascending: true });
 
@@ -1157,52 +1231,153 @@ function BrandInboxSection({
             query = query.eq('campaign_id', thread.campaign_id);
         }
 
-        const { data, error } = await query;
-        if (error) { setConversationLoading(false); return; }
+        try {
+            const { data: messagesData, error } = await query;
+            if (error) {
+                console.error('Error loading messages:', error);
+                setConversationLoading(false);
+                return;
+            }
 
-        const rows = (data ?? []) as unknown as (Message & { sender: { full_name: string } | { full_name: string }[] | null })[];
-        const msgs: Message[] = rows.map(row => ({
-            id: row.id,
-            sender_id: row.sender_id,
-            receiver_id: row.receiver_id,
-            content: row.content,
-            created_at: row.created_at,
-            read: row.read,
-            campaign_id: row.campaign_id,
-            sender_full_name:
-                (Array.isArray(row.sender) ? row.sender[0]?.full_name : row.sender?.full_name) ||
-                (row.sender_id === thread.partner_id ? thread.partner_name : 'You'),
-        }));
-        setConversation(msgs);
-        setConversationLoading(false);
-        await onThreadRead(thread.partner_id, thread.campaign_id);
-        setTimeout(scrollToBottom, 50);
-        setTimeout(() => inputRef.current?.focus(), 100);
+            if (!messagesData || messagesData.length === 0) {
+                setConversation([]);
+                setConversationLoading(false);
+                return;
+            }
+
+            const senderIds = [...new Set(messagesData.map(m => m.sender_id).filter(id => id !== currentUserId))];
+
+            const senderMap = new Map<string, string>();
+            if (senderIds.length > 0) {
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, full_name')
+                    .in('id', senderIds);
+                if (profiles) {
+                    profiles.forEach(p => senderMap.set(p.id, p.full_name));
+                }
+            }
+
+            const msgs: Message[] = messagesData.map(m => ({
+                id: m.id,
+                sender_id: m.sender_id,
+                receiver_id: m.receiver_id,
+                content: m.content,
+                created_at: m.created_at,
+                read: m.read,
+                campaign_id: m.campaign_id,
+                sender_full_name:
+                    m.sender_id === currentUserId
+                        ? 'You'
+                        : senderMap.get(m.sender_id) ?? thread.partner_name,
+            }));
+
+            setConversation(msgs);
+            await onThreadRead(thread.partner_id, thread.campaign_id);
+            setTimeout(scrollToBottom, 50);
+            setTimeout(() => inputRef.current?.focus(), 100);
+        } catch (err) {
+            console.error('Unexpected error in loadConversation:', err);
+        } finally {
+            setConversationLoading(false);
+        }
     }, [supabase, currentUserId, onThreadRead, scrollToBottom]);
+
+    const createThreadAndOpen = useCallback(async (partnerId: string, campaignId: string) => {
+        if (creatingThreadRef.current) return;
+        creatingThreadRef.current = true;
+
+        try {
+            const { data: created, error } = await supabase
+                .from('conversation_threads')
+                .insert({
+                    campaign_id: campaignId,
+                    brand_id: currentUserId,
+                    influencer_id: partnerId,
+                    started_by_brand: true,
+                    last_message: 'Conversation started',
+                    last_message_at: new Date().toISOString(),
+                })
+                .select('id, campaign_id, influencer_id, last_message, last_message_at, created_at')
+                .single();
+
+            if (error) {
+                console.error('Error creating thread:', error);
+                alert('Could not create conversation: ' + error.message);
+                return;
+            }
+
+            const [campaignRes, influencerRes] = await Promise.all([
+                supabase.from('campaigns').select('title').eq('id', campaignId).single(),
+                supabase.from('profiles').select('full_name').eq('id', partnerId).single(),
+            ]);
+
+            const campaignTitle = campaignRes.data?.title ?? 'Campaign';
+            const partnerName = influencerRes.data?.full_name ?? 'Influencer';
+
+            const newThread: Thread = {
+                id: created.id,
+                partner_id: created.influencer_id,
+                partner_name: partnerName,
+                campaign_id: created.campaign_id,
+                campaign_title: campaignTitle,
+                last_message: created.last_message || '',
+                last_at: created.last_message_at || created.created_at,
+                unread: false,
+            };
+
+            await onRefreshThreads();
+            loadConversation(newThread);
+        } catch (err) {
+            console.error('Unexpected error creating thread:', err);
+            alert('An unexpected error occurred while starting the conversation.');
+        } finally {
+            creatingThreadRef.current = false;
+        }
+    }, [supabase, currentUserId, loadConversation, onRefreshThreads]);
 
     // Auto‑open thread from URL params
     useEffect(() => {
-        if (!initialPartnerId || threads.length === 0) return;
+        if (loading) return;
 
-        const thread = threads.find(t =>
-            t.partner_id === initialPartnerId &&
-            (!initialCampaignId || t.campaign_id === initialCampaignId)
-        ) ?? threads.find(t => t.partner_id === initialPartnerId);
-
-        if (thread && (!selectedThread || selectedThread.partner_id !== thread.partner_id || selectedThread.campaign_id !== thread.campaign_id)) {
-            loadConversation(thread);
+        if (!threads.length) {
+            if (initialPartnerId && initialCampaignId && !initialThreadId) {
+                createThreadAndOpen(initialPartnerId, initialCampaignId);
+            }
+            return;
         }
-    }, [initialPartnerId, initialCampaignId, threads, loadConversation, selectedThread]);
+
+        let targetThread: Thread | undefined;
+
+        if (initialThreadId) {
+            targetThread = threads.find(t => t.id === initialThreadId);
+        }
+        if (!targetThread && initialPartnerId) {
+            targetThread = threads.find(t =>
+                t.partner_id === initialPartnerId &&
+                (!initialCampaignId || t.campaign_id === initialCampaignId)
+            ) ?? threads.find(t => t.partner_id === initialPartnerId);
+        }
+
+        if (!targetThread && initialPartnerId && initialCampaignId) {
+            createThreadAndOpen(initialPartnerId, initialCampaignId);
+            return;
+        }
+
+        if (targetThread && autoOpenedRef.current !== targetThread.id) {
+            autoOpenedRef.current = targetThread.id;
+            loadConversation(targetThread);
+        }
+    }, [threads, loading, initialThreadId, initialPartnerId, initialCampaignId, loadConversation, createThreadAndOpen]);
 
     // Mark all messages as read on mount
     useEffect(() => {
         const markAllReadAndRefresh = async () => {
             await supabase.from('messages').update({ read: true }).eq('receiver_id', currentUserId).eq('read', false);
             window.dispatchEvent(new Event('inbox:read'));
-            await onRefreshThreads();
         };
         markAllReadAndRefresh();
-    }, [currentUserId, supabase, onRefreshThreads]);
+    }, [currentUserId, supabase]);
 
     const handleSendReply = async () => {
         if (!replyText.trim() || !selectedThread) return;
@@ -1213,29 +1388,55 @@ function BrandInboxSection({
             campaign_id: selectedThread.campaign_id || null,
             read: false,
         };
-        const { data, error } = await supabase.from('messages').insert(newMsg).select('id, created_at').single();
-        if (error) return;
-        setConversation(prev => [...prev, {
-            id: data.id, sender_id: currentUserId, receiver_id: selectedThread.partner_id,
-            content: newMsg.content, created_at: data.created_at, read: false,
-            campaign_id: selectedThread.campaign_id, sender_full_name: 'You',
-        }]);
-        setReplyText('');
-        setTimeout(scrollToBottom, 30);
-        inputRef.current?.focus();
+        try {
+            const { data, error } = await supabase.from('messages').insert(newMsg).select('id, created_at').single();
+            if (error) {
+                console.error('Error sending message:', error);
+                return;
+            }
+
+            await supabase
+                .from('conversation_threads')
+                .update({
+                    last_message: replyText.trim(),
+                    last_message_at: data.created_at,
+                })
+                .eq('id', selectedThread.id);
+
+            setConversation(prev => [...prev, {
+                id: data.id,
+                sender_id: currentUserId,
+                receiver_id: selectedThread.partner_id,
+                content: newMsg.content,
+                created_at: data.created_at,
+                read: false,
+                campaign_id: selectedThread.campaign_id,
+                sender_full_name: 'You',
+            }]);
+            setReplyText('');
+            setTimeout(scrollToBottom, 30);
+            inputRef.current?.focus();
+        } catch (err) {
+            console.error('Unexpected error sending message:', err);
+        }
+    };
+
+    const handleBackToList = () => {
+        setShowChatMobile(false);
+        setSelectedThread(null);
     };
 
     return (
         <div className="flex flex-col flex-1 overflow-hidden h-full">
-            <div className="dash-header mb-4 flex-shrink-0">
+            <div className="hidden md:block dash-header mb-4 flex-shrink-0">
                 <h1 className="font-['Playfair_Display'] text-2xl md:text-3xl font-normal">Inbox</h1>
                 <p className="text-sm text-[#888880] mt-1">Campaign-scoped conversations with creators.</p>
             </div>
 
-            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
-                {/* Thread List */}
-                <div className="border-r md:border-r border-b md:border-b-0 border-[#E5E5DF] flex flex-col min-h-0">
-                    <div className="px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium flex-shrink-0">
+            <div className="flex-1 min-h-0 md:grid md:grid-cols-[300px_1fr] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+                {/* Thread List – on mobile, hide when chat is open */}
+                <div className={`border-r md:border-r border-b md:border-b-0 border-[#E5E5DF] flex flex-col min-h-0 ${showChatMobile ? 'hidden md:flex' : 'flex'}`}>
+                    <div className="px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium flex-shrink-0 bg-[#F6F6F2] md:bg-white">
                         Conversations
                     </div>
                     <div className="flex-1 overflow-y-auto">
@@ -1246,7 +1447,7 @@ function BrandInboxSection({
                         ) : (
                             threads.map(thread => {
                                 const key = `${thread.partner_id}::${thread.campaign_id}`;
-                                const isSel = selectedThread?.partner_id === thread.partner_id && selectedThread?.campaign_id === thread.campaign_id;
+                                const isSel = selectedThread?.id === thread.id;
                                 return (
                                     <div key={key} onClick={() => loadConversation(thread)}
                                          className={`px-4 py-3 border-b border-[#E5E5DF] cursor-pointer transition-colors ${isSel ? 'bg-[#F0F0EA]' : 'hover:bg-[#F6F6F2]'}`}>
@@ -1270,11 +1471,12 @@ function BrandInboxSection({
                     </div>
                 </div>
 
-                {/* Chat Pane */}
-                <div className="flex flex-col min-h-0">
+                {/* Chat Pane – on mobile, show when a thread is selected */}
+                <div className={`flex flex-col min-h-0 ${showChatMobile ? 'flex' : 'hidden md:flex'}`}>
                     {selectedThread ? (
                         <>
                             <div className="px-4 py-3 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
+                                <button onClick={handleBackToList} className="md:hidden text-lg leading-none mr-1 text-[#888880] hover:text-[#0D0D0B]">←</button>
                                 <div className="w-9 h-9 rounded-full bg-[#E8E8E2] flex items-center justify-center text-sm font-medium flex-shrink-0">
                                     {selectedThread.partner_name.slice(0, 2).toUpperCase()}
                                 </div>

@@ -17,7 +17,7 @@ interface Profile {
     email: string;
     role: string;
     created_at: string;
-    status?: string;       // 'approved' | 'banned' | 'pending' etc.
+    status?: string;
 }
 
 interface CampaignRow {
@@ -106,7 +106,7 @@ interface UserManagementProps {
     onVerifyUser: (id: string) => void;
     onViewUser: (profile: Profile) => void;
     currentAdminRole: string;
-    onToggleBan: (userId: string, currentStatus: string) => void;   // new
+    onToggleBan: (userId: string, currentStatus: string) => void;
 }
 
 interface CampaignMonitorProps {
@@ -180,7 +180,6 @@ function AdminDashboardInner() {
         text: string;
     } | null>(null);
 
-    // New chat state
     const [showNewChatModal, setShowNewChatModal] = useState(false);
     const [newChatRecipientId, setNewChatRecipientId] = useState('');
     const [newChatMessage, setNewChatMessage] = useState('');
@@ -249,7 +248,6 @@ function AdminDashboardInner() {
     }, [supabase]);
 
     const fetchThreads = useCallback(async () => {
-        // ... (unchanged, same as previously provided)
         setLoadingThreads(true);
         const { data: threadData, error: threadError } = await supabase
             .from('conversation_threads')
@@ -420,7 +418,6 @@ function AdminDashboardInner() {
         }
     };
 
-    // ── NEW: Toggle Ban ──
     const handleToggleBan = useCallback(async (userId: string, currentStatus: string) => {
         const newStatus = currentStatus === 'banned' ? 'active' : 'banned';
         const { error } = await supabase
@@ -458,7 +455,6 @@ function AdminDashboardInner() {
         setMakeAdminLoading(false);
     };
 
-    // ── New Chat Handlers ──
     const handleCreateNewChat = async () => {
         if (!user || !newChatRecipientId) return;
         setCreatingChat(true);
@@ -504,7 +500,6 @@ function AdminDashboardInner() {
         router.replace(`/dashboard/admin?${params.toString()}`);
     };
 
-    // ── Send Reply ──
     const handleSendReply = useCallback(async (threadId: string, content: string) => {
         if (!user || !content.trim()) return;
         const thread = threads.find(t => t.id === threadId);
@@ -557,7 +552,6 @@ function AdminDashboardInner() {
         navItems.push({ key: 'make-admin', icon: '⚡', label: 'Make Admin' });
     }
 
-    // Real‑time update for admin inbox (unchanged)
     useEffect(() => {
         if (!user) return;
 
@@ -581,8 +575,9 @@ function AdminDashboardInner() {
     }, [user, supabase, fetchThreads, selectedThread, loadConversation]);
 
     return (
-        <div className="dashboard-shell flex min-h-[calc(100vh-48px)]">
-            <aside className="sidebar bg-white border-r border-[#E5E5DF] w-[220px] flex flex-col py-7 px-0">
+        <div className="dashboard-shell !flex flex-col md:!grid md:grid-cols-[220px_1fr] min-h-[calc(100vh-48px)]">
+            {/* Sidebar – force hidden on mobile with !hidden, force flex on desktop with md:!flex */}
+            <aside className="sidebar !hidden md:!flex flex-col w-[220px] bg-white border-r border-[#E5E5DF] py-7 px-0 flex-shrink-0">
                 <div className="sidebar-brand px-6 mb-8">
                     <Link href="/" className="logo font-['Playfair_Display'] text-lg font-bold">HYIPE</Link>
                     <span className="text-[9px] uppercase text-white bg-[#A32D2D] px-1.5 py-0.5 rounded-full inline-block mt-1">
@@ -617,7 +612,8 @@ function AdminDashboardInner() {
                 </div>
             </aside>
 
-            <main className="dash-content bg-[#F6F6F2] flex-1 p-10 overflow-y-auto">
+            {/* Main content – extra bottom padding for mobile nav */}
+            <main className="dash-content bg-[#F6F6F2] flex-1 p-4 md:p-10 overflow-y-auto pb-20 md:pb-10">
                 {activeSub === 'users' && (
                     <UserManagementSection
                         allProfiles={allProfiles} loading={loadingUsers}
@@ -658,6 +654,26 @@ function AdminDashboardInner() {
                     />
                 )}
             </main>
+
+            {/* Mobile Bottom Navigation – only visible on mobile */}
+            <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#E5E5DF] flex md:hidden justify-around items-center py-2 z-50">
+                {navItems
+                    .filter(item => item.key !== 'make-admin')
+                    .map(({ key, icon, label }) => (
+                        <button
+                            key={key}
+                            onClick={() => switchTab(key)}
+                            className={`flex flex-col items-center gap-1 px-3 py-1 rounded text-[10px] ${
+                                activeSub === key
+                                    ? 'text-[#0D0D0B] font-medium'
+                                    : 'text-[#888880]'
+                            }`}
+                        >
+                            <span className="text-lg">{icon}</span>
+                            {label === 'User Management' ? 'Users' : label === 'Campaign Monitor' ? 'Monitor' : 'Inbox'}
+                        </button>
+                    ))}
+            </nav>
 
             {/* New Chat Modal */}
             {showNewChatModal && (
@@ -713,6 +729,7 @@ function AdminDashboardInner() {
                 </div>
             )}
 
+            {/* View Profile Modal */}
             {viewProfile && (
                 <div className="fixed inset-0 bg-black/45 z-[200] flex items-center justify-center">
                     <div className="bg-white rounded p-9 max-w-[560px] w-[90%] max-h-[85vh] overflow-y-auto">
@@ -734,7 +751,7 @@ function AdminDashboardInner() {
     );
 }
 
-/* ─── Updated User Management Section (with Ban button) ─── */
+/* ─── User Management Section (with mobile cards & Ban/Verify actions) ─── */
 function UserManagementSection({
                                    allProfiles, loading, searchQuery, setSearchQuery, roleFilter, setRoleFilter,
                                    page, setPage, pageSize, onRemoveUser, onVerifyUser, onViewUser, currentAdminRole,
@@ -755,58 +772,124 @@ function UserManagementSection({
 
     return (
         <>
-            <div className="admin-top flex justify-between items-center mb-5">
+            {/* Header & Search/Filter */}
+            <div className="flex flex-col md:flex-row md:justify-between items-start md:items-center mb-5 gap-3">
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">
                     User Management <span className="badge-count bg-[#0D0D0B] text-white text-[10px] px-1.5 py-0.5 rounded-full ml-1.5">{allProfiles.length}</span>
                 </h2>
-                <div className="flex gap-2">
-                    <input placeholder="Search users..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="border border-[#E5E5DF] px-3 py-2 rounded text-xs font-sans outline-none" />
-                    <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="filter-select border border-[#E5E5DF] rounded px-3 py-2 text-xs bg-white outline-none">
-                        <option value="all">All Users</option>
+                <div className="flex gap-2 w-full md:w-auto">
+                    <input
+                        placeholder="Search users..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="border border-[#E5E5DF] px-3 py-2 rounded text-xs font-sans outline-none flex-1 md:flex-initial"
+                    />
+                    <select
+                        value={roleFilter}
+                        onChange={(e) => setRoleFilter(e.target.value)}
+                        className="border border-[#E5E5DF] rounded px-3 py-2 text-xs bg-white outline-none"
+                    >
+                        <option value="all">All</option>
                         <option value="brand">Brands</option>
                         <option value="influencer">Creators</option>
                     </select>
                 </div>
             </div>
 
-            <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden">
-                <thead>
-                <tr>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Name</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Email</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Role</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Joined</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Status</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Actions</th>
-                </tr>
-                </thead>
-                <tbody>
+            {/* Desktop Table – hidden on mobile */}
+            <div className="hidden md:block">
+                <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden">
+                    <thead>
+                    <tr>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Name</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Email</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Role</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Joined</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Status</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {loading ? (
+                        <tr><td colSpan={6} className="text-center py-4 text-sm text-[#888880]">Loading...</td></tr>
+                    ) : paginated.length === 0 ? (
+                        <tr><td colSpan={6} className="text-center py-4 text-sm text-[#888880]">No users found.</td></tr>
+                    ) : (
+                        paginated.map((p) => {
+                            const status = p.status || 'pending';
+                            let statusStyle = 'bg-[#FFF8E6] text-[#7A5200]';
+                            if (status === 'active') statusStyle = 'bg-[#E8F5E0] text-[#2A6000]';
+                            if (status === 'banned') statusStyle = 'bg-[#FCE4E4] text-[#A32020]';
+
+                            return (
+                                <tr key={p.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
+                                    <td className="px-4 py-3 text-sm"><strong>{p.full_name}</strong></td>
+                                    <td className="px-4 py-3 text-sm">{p.email}</td>
+                                    <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">{p.role}</span></td>
+                                    <td className="px-4 py-3 text-sm">{new Date(p.created_at).toLocaleDateString()}</td>
+                                    <td className="px-4 py-3 text-sm">
+                                            <span className={`status-badge px-2.5 py-1 rounded text-[10px] uppercase font-medium ${statusStyle}`}>
+                                                {status}
+                                            </span>
+                                    </td>
+                                    <td className="admin-actions flex gap-1.5">
+                                        <button onClick={() => onViewUser(p)} className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
+                                        {status === 'pending' && (
+                                            <button onClick={() => onVerifyUser(p.id)} className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Verify</button>
+                                        )}
+                                        {p.role !== 'admin' && p.role !== 'superadmin' && (
+                                            <button
+                                                onClick={() => onToggleBan(p.id, status)}
+                                                className={`btn-sm px-3 py-1 text-[10px] uppercase ${
+                                                    status === 'banned'
+                                                        ? 'border border-green-600 text-green-600 bg-green-50'
+                                                        : 'border border-red-500 text-red-500 bg-red-50'
+                                                }`}
+                                            >
+                                                {status === 'banned' ? 'Unban' : 'Ban'}
+                                            </button>
+                                        )}
+                                        {canDelete(p.role) && (
+                                            <button onClick={() => onRemoveUser(p.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
+                                        )}
+                                    </td>
+                                </tr>
+                            );
+                        })
+                    )}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* Mobile Cards – visible only on small screens */}
+            <div className="block md:hidden space-y-4">
                 {loading ? (
-                    <tr><td colSpan={6} className="text-center py-4 text-sm text-[#888880]">Loading...</td></tr>
+                    <div className="text-center text-sm text-[#888880] py-8">Loading...</div>
                 ) : paginated.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-4 text-sm text-[#888880]">No users found.</td></tr>
+                    <div className="text-center text-sm text-[#888880] py-8">No users found.</div>
                 ) : (
-                    paginated.map((p) => {
+                    paginated.map(p => {
                         const status = p.status || 'pending';
-                        // Determine status badge styling
-                        let statusStyle = 'bg-[#FFF8E6] text-[#7A5200]'; // pending default
-                        if (status === 'active') statusStyle = 'bg-[#E8F5E0] text-[#2A6000]';
-                        if (status === 'banned') statusStyle = 'bg-[#FCE4E4] text-[#A32020]';
-                        if (status === 'active') statusStyle = 'bg-[#E8F5E0] text-[#2A6000]'; // treat active same as approved
+                        let statusClass = 'bg-[#FFF8E6] text-[#7A5200]';
+                        if (status === 'active') statusClass = 'bg-[#E8F5E0] text-[#2A6000]';
+                        if (status === 'banned') statusClass = 'bg-[#FCE4E4] text-[#A32020]';
 
                         return (
-                            <tr key={p.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                                <td className="px-4 py-3 text-sm"><strong>{p.full_name}</strong></td>
-                                <td className="px-4 py-3 text-sm">{p.email}</td>
-                                <td className="px-4 py-3 text-sm"><span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">{p.role}</span></td>
-                                <td className="px-4 py-3 text-sm">{new Date(p.created_at).toLocaleDateString()}</td>
-                                <td className="px-4 py-3 text-sm">
-                                    <span className={`status-badge px-2.5 py-1 rounded text-[10px] uppercase font-medium ${statusStyle}`}>
+                            <div key={p.id} className="admin-mob-card bg-white border border-[#E5E5DF] rounded p-4">
+                                <div className="flex justify-between items-center">
+                                    <h4 className="font-medium text-sm">{p.full_name}</h4>
+                                    <span className={`status-badge px-2.5 py-0.5 rounded text-[10px] uppercase font-medium ${statusClass}`}>
                                         {status}
                                     </span>
-                                </td>
-                                <td className="admin-actions flex gap-1.5">
+                                </div>
+                                <div className="meta text-xs text-[#888880] mt-1">
+                                    {p.email} · <span className="tag bg-[#F0F0EA] text-[#3A3A36] px-2 py-0.5 rounded text-[10px] uppercase">{p.role}</span> · Joined {new Date(p.created_at).toLocaleDateString()}
+                                </div>
+                                <div className="flex flex-wrap gap-2 mt-3">
                                     <button onClick={() => onViewUser(p)} className="btn-sm border border-[#E5E5DF] text-[#3A3A36] px-3 py-1 text-[10px] uppercase">View</button>
+                                    {status === 'pending' && (
+                                        <button onClick={() => onVerifyUser(p.id)} className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Verify</button>
+                                    )}
                                     {p.role !== 'admin' && p.role !== 'superadmin' && (
                                         <button
                                             onClick={() => onToggleBan(p.id, status)}
@@ -822,14 +905,14 @@ function UserManagementSection({
                                     {canDelete(p.role) && (
                                         <button onClick={() => onRemoveUser(p.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Remove</button>
                                     )}
-                                </td>
-                            </tr>
+                                </div>
+                            </div>
                         );
                     })
                 )}
-                </tbody>
-            </table>
+            </div>
 
+            {/* Pagination */}
             <div className="flex justify-between items-center mt-4">
                 <span className="text-xs text-[#888880]">Showing {paginated.length} of {filtered.length} users</span>
                 <div className="flex gap-1">
@@ -844,7 +927,7 @@ function UserManagementSection({
     );
 }
 
-/* ─── Make Admin Section (unchanged) ─── */
+/* ─── Make Admin Section ─── */
 function MakeAdminSection({ email, setEmail, onPromote, loading, message }: MakeAdminProps) {
     return (
         <>
@@ -891,14 +974,14 @@ function MakeAdminSection({ email, setEmail, onPromote, loading, message }: Make
     );
 }
 
-/* ─── Campaign Monitor Section (unchanged) ─── */
+/* ─── Campaign Monitor Section ─── */
 function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: CampaignMonitorProps) {
     const awaitingReview = campaigns.filter((c) => c.status === 'under_review');
     const liveCampaigns = campaigns.filter((c) => c.status === 'live');
 
     return (
         <>
-            <div className="admin-top flex justify-between items-center mb-5">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-5 gap-3">
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">Campaign Monitor</h2>
                 {awaitingReview.length > 0 && (
                     <span className="wf-note bg-[#FFFBEA] border border-[#F0D88A] rounded px-2 py-1 text-[10px] text-[#7A6200] font-mono uppercase">
@@ -913,73 +996,77 @@ function CampaignMonitorSection({ campaigns, loading, onApprove, onReject }: Cam
                 </div>
             )}
 
-            <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden">
-                <thead>
-                <tr>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Campaign</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Brand</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Budget</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Submitted</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Status</th>
-                    <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Actions</th>
-                </tr>
-                </thead>
-                <tbody>
-                {loading ? (
-                    <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-[#888880]">Loading campaigns...</td></tr>
-                ) : awaitingReview.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-[#888880]">No campaigns awaiting review.</td></tr>
-                ) : (
-                    awaitingReview.map((c) => (
-                        <tr key={c.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                            <td className="px-4 py-3 text-sm">
-                                <strong>{c.title}</strong><br />
-                                <span className="text-[11px] text-[#888880]">{c.niche}</span>
-                            </td>
-                            <td className="px-4 py-3 text-sm">{c.brand.full_name}</td>
-                            <td className="px-4 py-3 text-sm">Rs. {Number(c.budget).toLocaleString()}</td>
-                            <td className="px-4 py-3 text-sm">{new Date(c.created_at).toLocaleDateString()}</td>
-                            <td className="px-4 py-3 text-sm"><span className="status-badge status-pending bg-[#FFF8E6] text-[#7A5200] px-2.5 py-1 rounded text-[10px] uppercase font-medium">In Review</span></td>
-                            <td className="admin-actions flex gap-1.5">
-                                <button onClick={() => onApprove(c.id)} className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Approve →</button>
-                                <button onClick={() => onReject(c.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
-                            </td>
-                        </tr>
-                    ))
-                )}
-                </tbody>
-            </table>
+            <div className="overflow-x-auto">
+                <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden min-w-[600px]">
+                    <thead>
+                    <tr>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Campaign</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Brand</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Budget</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Submitted</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Status</th>
+                        <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {loading ? (
+                        <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-[#888880]">Loading campaigns...</td></tr>
+                    ) : awaitingReview.length === 0 ? (
+                        <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-[#888880]">No campaigns awaiting review.</td></tr>
+                    ) : (
+                        awaitingReview.map((c) => (
+                            <tr key={c.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
+                                <td className="px-4 py-3 text-sm">
+                                    <strong>{c.title}</strong><br />
+                                    <span className="text-[11px] text-[#888880]">{c.niche}</span>
+                                </td>
+                                <td className="px-4 py-3 text-sm">{c.brand.full_name}</td>
+                                <td className="px-4 py-3 text-sm">Rs. {Number(c.budget).toLocaleString()}</td>
+                                <td className="px-4 py-3 text-sm">{new Date(c.created_at).toLocaleDateString()}</td>
+                                <td className="px-4 py-3 text-sm"><span className="status-badge status-pending bg-[#FFF8E6] text-[#7A5200] px-2.5 py-1 rounded text-[10px] uppercase font-medium">In Review</span></td>
+                                <td className="admin-actions flex gap-1.5">
+                                    <button onClick={() => onApprove(c.id)} className="btn-sm success border border-[#3B6D11] text-[#3B6D11] bg-[#EAF3DE] px-3 py-1 text-[10px] uppercase">Approve →</button>
+                                    <button onClick={() => onReject(c.id)} className="btn-sm danger border border-[#E24B4A] text-[#E24B4A] px-3 py-1 text-[10px] uppercase">Reject</button>
+                                </td>
+                            </tr>
+                        ))
+                    )}
+                    </tbody>
+                </table>
+            </div>
 
             {liveCampaigns.length > 0 && (
                 <>
                     <h3 className="mt-8 mb-3 text-lg font-['Playfair_Display'] font-medium">Live Campaigns</h3>
-                    <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden">
-                        <thead>
-                        <tr>
-                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Campaign</th>
-                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Brand</th>
-                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Budget</th>
-                            <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Status</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {liveCampaigns.map((c) => (
-                            <tr key={c.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
-                                <td className="px-4 py-3 text-sm"><strong>{c.title}</strong></td>
-                                <td className="px-4 py-3 text-sm">{c.brand.full_name}</td>
-                                <td className="px-4 py-3 text-sm">Rs. {Number(c.budget).toLocaleString()}</td>
-                                <td className="px-4 py-3 text-sm"><span className="status-badge status-live bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Live ✓</span></td>
+                    <div className="overflow-x-auto">
+                        <table className="admin-table w-full border-collapse bg-white border border-[#E5E5DF] rounded overflow-hidden min-w-[600px]">
+                            <thead>
+                            <tr>
+                                <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Campaign</th>
+                                <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Brand</th>
+                                <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Budget</th>
+                                <th className="bg-[#F0F0EA] px-4 py-2.5 text-left text-[10px] uppercase tracking-[0.08em] text-[#888880] border-b border-[#E5E5DF]">Status</th>
                             </tr>
-                        ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                            {liveCampaigns.map((c) => (
+                                <tr key={c.id} className="border-b border-[#E5E5DF] hover:bg-[#FAFAF7]">
+                                    <td className="px-4 py-3 text-sm"><strong>{c.title}</strong></td>
+                                    <td className="px-4 py-3 text-sm">{c.brand.full_name}</td>
+                                    <td className="px-4 py-3 text-sm">Rs. {Number(c.budget).toLocaleString()}</td>
+                                    <td className="px-4 py-3 text-sm"><span className="status-badge status-live bg-[#E1F7EE] text-[#0A5A38] px-2.5 py-1 rounded text-[10px] uppercase font-medium">Live ✓</span></td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </>
             )}
         </>
     );
 }
 
-/* ─── Admin Inbox Section (unchanged) ─── */
+/* ─── Admin Inbox Section (with mobile toggle) ─── */
 function AdminInboxSection({
                                threads,
                                loading,
@@ -993,6 +1080,8 @@ function AdminInboxSection({
                                onSendReply,
                            }: AdminInboxProps) {
     const [replyText, setReplyText] = useState('');
+    const [showMobileChat, setShowMobileChat] = useState(false);
+
     const canSend = selectedThread &&
         (selectedThread.brand_id === currentUserId || selectedThread.influencer_id === currentUserId);
 
@@ -1000,6 +1089,16 @@ function AdminInboxSection({
         if (!selectedThread || !replyText.trim()) return;
         onSendReply(selectedThread.id, replyText.trim());
         setReplyText('');
+    };
+
+    const handleThreadSelect = (thread: AdminThread) => {
+        loadConversation(thread);
+        setShowMobileChat(true);
+    };
+
+    const handleBackToList = () => {
+        setShowMobileChat(false);
+        setSelectedThread(null);
     };
 
     const headerTitle = selectedThread
@@ -1010,7 +1109,7 @@ function AdminInboxSection({
 
     return (
         <>
-            <div className="admin-top flex justify-between items-center mb-5">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-5 gap-3">
                 <h2 className="font-['Playfair_Display'] text-2xl font-normal">Inbox Viewer</h2>
                 <button
                     onClick={onNewChat}
@@ -1023,8 +1122,9 @@ function AdminInboxSection({
                 🔒 Admin view. All conversations are visible. You can reply to threads where you are a participant.
             </div>
 
-            <div className="inbox-layout grid grid-cols-[300px_1fr] h-[calc(100vh-220px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
-                {/* Thread List */}
+            {/* Desktop layout (unchanged) */}
+            <div className="hidden md:grid grid-cols-[300px_1fr] h-[calc(100vh-220px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+                {/* Thread List – hidden on mobile, visible on md+ */}
                 <div className="inbox-list border-r border-[#E5E5DF] overflow-y-auto">
                     <div className="inbox-list-header px-4 py-4 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium">
                         All Threads ({threads.length})
@@ -1065,7 +1165,7 @@ function AdminInboxSection({
                     )}
                 </div>
 
-                {/* Chat Pane */}
+                {/* Chat Pane – always visible on desktop */}
                 <div className="chat-pane flex flex-col min-h-0">
                     {selectedThread ? (
                         <>
@@ -1148,6 +1248,140 @@ function AdminInboxSection({
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* Mobile layout – visible only on small screens */}
+            <div className="block md:hidden">
+                {!showMobileChat ? (
+                    /* Thread list on mobile */
+                    <div className="bg-white border border-[#E5E5DF] rounded overflow-hidden">
+                        <div className="px-4 py-3 border-b border-[#E5E5DF] text-xs uppercase tracking-[0.06em] text-[#888880] font-medium bg-[#F6F6F2]">
+                            All Threads ({threads.length})
+                        </div>
+                        <div className="divide-y divide-[#E5E5DF] max-h-[calc(100vh-340px)] overflow-y-auto">
+                            {loading ? (
+                                <div className="px-4 py-4 text-xs text-[#888880]">Loading...</div>
+                            ) : threads.length === 0 ? (
+                                <div className="px-4 py-4 text-xs text-[#888880]">No conversations yet.</div>
+                            ) : (
+                                threads.map((thread) => (
+                                    <div
+                                        key={thread.id}
+                                        onClick={() => handleThreadSelect(thread)}
+                                        className={`px-4 py-3 cursor-pointer hover:bg-[#F6F6F2] ${
+                                            selectedThread?.id === thread.id ? 'bg-[#F0F0EA]' : ''
+                                        }`}
+                                    >
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-medium truncate">
+                                                    {thread.brand_name} ↔ {thread.influencer_name}
+                                                </div>
+                                                <div className="text-[10px] text-[#5E7A0A] font-medium truncate mt-0.5 uppercase">
+                                                    {thread.campaign_title}
+                                                </div>
+                                                <div className="text-xs text-[#888880] truncate mt-0.5">
+                                                    {thread.last_message}
+                                                </div>
+                                            </div>
+                                            <span className="text-[10px] text-[#888880] ml-2 flex-shrink-0">
+                                                {new Date(thread.last_at).toLocaleDateString()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        <div className="px-4 py-3 bg-[#FFF8E6] border-t border-[#F0D88A] text-xs text-[#7A5200]">
+                            ⚠ Admin view only. Messages are read‑only for moderation purposes.
+                        </div>
+                    </div>
+                ) : (
+                    /* Conversation pane on mobile */
+                    <div className="flex flex-col h-[calc(100vh-260px)] border border-[#E5E5DF] rounded overflow-hidden bg-white">
+                        {selectedThread ? (
+                            <>
+                                <div className="px-4 py-3 border-b border-[#E5E5DF] flex items-center gap-3 flex-shrink-0 bg-white">
+                                    <button
+                                        onClick={handleBackToList}
+                                        className="text-lg leading-none mr-1 text-[#888880] hover:text-[#0D0D0B]"
+                                    >
+                                        ←
+                                    </button>
+                                    <div>
+                                        <div className="text-sm font-semibold">
+                                            {selectedThread.brand_name} ↔ {selectedThread.influencer_name}
+                                        </div>
+                                        {headerTitle && (
+                                            <div className="text-[10px] text-[#5E7A0A] uppercase">{headerTitle}</div>
+                                        )}
+                                        {!headerTitle && (
+                                            <div className="text-[10px] text-[#5E7A0A] uppercase">Direct Chat</div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                                    {conversationLoading ? (
+                                        <div className="text-sm text-[#888880]">Loading...</div>
+                                    ) : conversation.length === 0 ? (
+                                        <div className="text-sm text-[#888880]">No messages in this thread.</div>
+                                    ) : (
+                                        conversation.map((msg) => (
+                                            <div
+                                                key={msg.id}
+                                                className={`max-w-[85%] px-3 py-2.5 rounded text-sm leading-relaxed ${
+                                                    msg.sender_id === selectedThread.brand_id
+                                                        ? 'bg-[#F0F0EA] self-start'
+                                                        : msg.sender_id === selectedThread.influencer_id
+                                                            ? 'bg-[#0D0D0B] text-white self-end'
+                                                            : 'bg-[#EEEEEE] self-start'
+                                                }`}
+                                            >
+                                                <div className="text-[10px] font-medium mb-1 text-[#888880]">
+                                                    {msg.sender_name || 'Unknown'}
+                                                </div>
+                                                {msg.content}
+                                                <div className="text-[10px] mt-1 opacity-50">
+                                                    {new Date(msg.created_at).toLocaleTimeString([], {
+                                                        hour: '2-digit',
+                                                        minute: '2-digit',
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                                {canSend && (
+                                    <div className="border-t border-[#E5E5DF] px-4 py-3 flex gap-2.5 flex-shrink-0 bg-white">
+                                        <input
+                                            value={replyText}
+                                            onChange={(e) => setReplyText(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    handleReply();
+                                                }
+                                            }}
+                                            placeholder="Type a reply..."
+                                            className="flex-1 border border-[#E5E5DF] rounded px-3 py-2 text-sm outline-none"
+                                        />
+                                        <button
+                                            onClick={handleReply}
+                                            disabled={!replyText.trim()}
+                                            className="bg-[#0D0D0B] text-white px-4 py-2 text-xs uppercase tracking-[0.04em] disabled:opacity-50"
+                                        >
+                                            Send
+                                        </button>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className="flex-1 flex items-center justify-center text-sm text-[#888880]">
+                                Select a conversation to read
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </>
     );
